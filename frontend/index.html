@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Asistente de crédito</title>
+  <meta name="description" content="Chat de crédito con verificación de identidad y derivación a un asesor (prototipo con datos sintéticos).">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo" aria-hidden="true">C</span>
+        <div>
+          <h1 id="app-title">Asistente de crédito</h1>
+          <p class="badge" id="app-badge">Prototipo · datos sintéticos</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <label class="visually-hidden" for="lang-switch" id="lang-switch-label">Idioma</label>
+        <select id="lang-switch" class="lang-switch">
+          <option value="es">Español</option>
+          <option value="pt">Português</option>
+        </select>
+        <button type="button" id="end-btn" class="btn btn-quiet" hidden>Terminar conversación</button>
+      </div>
+    </header>
+
+    <main class="main">
+      <p id="banner" class="banner" role="alert" hidden></p>
+
+      <!-- 1. Documento -->
+      <section id="view-login" class="card view" aria-labelledby="login-title">
+        <h2 id="login-title">Verifique su identidad</h2>
+        <p id="login-help" class="muted"></p>
+        <form id="login-form" novalidate>
+          <label for="doc" id="doc-label">Número de documento</label>
+          <input id="doc" name="doc" type="text" inputmode="numeric" autocomplete="off" maxlength="32"
+                 aria-describedby="doc-error" required>
+          <p id="doc-error" class="field-error" role="alert" hidden></p>
+          <button type="submit" id="login-btn" class="btn btn-primary">Continuar</button>
+        </form>
+      </section>
+
+      <!-- 2. Preguntas de seguridad -->
+      <section id="view-challenge" class="card view" aria-labelledby="challenge-title" hidden>
+        <h2 id="challenge-title">Preguntas de seguridad</h2>
+        <p id="challenge-help" class="muted"></p>
+        <form id="challenge-form" novalidate>
+          <div id="questions"></div>
+          <div class="row">
+            <button type="button" id="challenge-back" class="btn btn-quiet">Volver</button>
+            <button type="submit" id="verify-btn" class="btn btn-primary" disabled>Verificar</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- 3. Chat -->
+      <section id="view-chat" class="chat view" aria-label="Chat" hidden>
+        <div id="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions"></div>
+        <div id="suggestions" class="suggestions" aria-label="Respuestas sugeridas"></div>
+        <form id="composer" class="composer" autocomplete="off">
+          <label class="visually-hidden" for="input" id="input-label">Escriba su mensaje</label>
+          <input id="input" type="text" maxlength="1000" autocomplete="off" placeholder="Escriba su mensaje">
+          <button type="submit" id="send-btn" class="btn btn-primary">Enviar</button>
+        </form>
+      </section>
+
+      <!-- 4. Fin -->
+      <section id="view-ended" class="card view" aria-labelledby="ended-title" hidden>
+        <h2 id="ended-title">Conversación terminada</h2>
+        <p id="ended-text" class="muted"></p>
+        <button type="button" id="restart-btn" class="btn btn-primary">Nueva conversación</button>
+      </section>
+    </main>
+
+    <footer class="footer"><small id="disclaimer"></small></footer>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="i18n.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
