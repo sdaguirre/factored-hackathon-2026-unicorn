@@ -1,5 +1,9 @@
 # Credit rules (synthetic, policy version 0.2)
 
+> Policy 0.2 is the reference version of the credit rules. Earlier components
+> (`backend/policy/credit_policy.yaml`, gold views) were built on preliminary versions so the
+> team could move in parallel; they are aligned to this version in follow-up PRs.
+
 These rules produce **indicative pre-approved offers** for marketing and lead generation.
 No offer is final: every customer who wants to proceed is handed off to an advisor, who
 verifies documents and decides. Products in scope: credit card, personal loan and mortgage.
