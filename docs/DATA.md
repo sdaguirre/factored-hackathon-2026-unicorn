@@ -59,6 +59,26 @@ python -m jupyter nbconvert --to notebook --execute --inplace analysis/notebooks
 python backend/scripts/build_snapshot.py --customers 400                                                   # snapshot del backend
 ```
 
+## Databricks credit layers
+
+The credit flow is also built in Databricks (Unity Catalog, `workspace` catalog). Run order,
+objects and results are in `data/databricks/README.md`; policy and formulas in
+`docs/CREDIT_RULES.md` (policy 0.2, the team's source of truth for credit rules).
+
+| Layer | Objects | Notes |
+|---|---|---|
+| bronze `bronze_latam_bank` | `complaints`, `call_center_interactions` | Loaded as delivered from the daily CSVs; verified against the source files (rows per file, nulls per column, numeric sums, text length) |
+| silver `silver_latam_bank` | `ref_product_catalog`, `ref_term_grid`, `ref_policy_params`, `ref_policy_bands`, `ref_segment_adjustments` | Synthetic reference tables from `data/reference/` (catalog, pricing, policy) that stand in for source data the dataset lacks |
+| gold `gold_latam_bank` | `customer_credit_profile`, `customer_credit_offer_options`, `credit_offers`, `fn_monthly_installment`, `fn_max_principal` | Indicators and baseline offers for all 150,000 customers as of 2026-06-30; `credit_offers` stores offers accepted in the chat |
+
+Findings from building these layers that complement the table above:
+- Observed deposits are sparse (median under 2 per year per customer) and a median 20% of
+  declared income, so policy 0.2 uses declared income for the 20% limit.
+- `amount_usd` is null for every USD transaction; use `coalesce(amount_usd, amount)` for USD.
+- Loans have no `expiration_date`; existing loan installments use the synthetic term grid.
+- In silver, numeric columns are strings and `credit_score` comes as `'805.0'`, so
+  `CAST(... AS INT)` fails; cast to `DOUBLE` first or use `try_cast`.
+
 ## Controles de calidad que existen hoy
 
 Ejecutados en los notebooks (`analysis/notebooks/`): unicidad de claves primarias, integridad de claves foráneas, rangos
