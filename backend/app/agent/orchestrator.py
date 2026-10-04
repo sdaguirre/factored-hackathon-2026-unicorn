@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 MAX_REPLY_CHARS = 1200
 # Solo estos mensajes pueden ser reescritos por el LLM. Decisiones de credito, ofertas, derivaciones y avisos legales
 # salen siempre de la plantilla revisada: el guardia de numeros no detecta frases nuevas que cambien el compromiso.
-DEFAULT_REWRITE_KINDS = frozenset({"greeting", "thanks", "closing", "unknown", "ask_amount", "ask_income",
+DEFAULT_REWRITE_KINDS = frozenset({"thanks", "closing", "goodbye", "unknown", "ask_amount", "ask_income",
                                    "handoff_declined", "offer_declined", "offer_accepted"})
 
 
@@ -58,10 +58,19 @@ def _digit_runs(text: str) -> set[str]:
     return set(re.findall(r"\d+", text))
 
 
+# El asistente nunca se hace pasar por una persona: un texto que lo afirme se descarta siempre.
+_CLAIMS_HUMAN = re.compile(
+    r"\b(soy|sou)\s+(una?\s+|um\s+|uma\s+)?(persona|pessoa|humano|humana|agente humano|ejecutiv[oa]|asesor[a]?|consultor[a]?)\b"
+    r"|\bno soy (un |una )?(robot|bot|ia|inteligencia artificial)\b|\bn[aã]o sou (um |uma )?(rob[oô]|bot|ia|intelig[eê]ncia artificial)\b",
+    re.IGNORECASE)
+
+
 def safe_text(candidate: str, facts: dict) -> bool:
-    """Acepta el texto del LLM solo si no introduce numeros ajenos a los hechos y tiene tamano razonable."""
+    """Acepta el texto del LLM solo si no introduce numeros ajenos a los hechos, no se hace pasar por una persona y tiene
+    tamano razonable."""
     allowed = _digit_runs(" ".join(facts.get("fmt", {}).values()))
-    return 0 < len(candidate) <= MAX_REPLY_CHARS and _digit_runs(candidate) <= allowed
+    return (0 < len(candidate) <= MAX_REPLY_CHARS and _digit_runs(candidate) <= allowed
+            and not _CLAIMS_HUMAN.search(candidate))
 
 
 def validate_nlu(nlu: NLUResult, message: str) -> NLUResult:
@@ -99,6 +108,7 @@ class Orchestrator:
             session.slots["no_offers"] = True  # en toda la sesion: ninguna oferta comercial
 
         facts = self._dispatch(session, ctx, nlu, message)
+        facts["variant"] = len(session.history) // 2        # rota las formulaciones de los mensajes de bajo riesgo
         reply = self._render(facts, lang)
         session.history.append({"role": "assistant", "text": reply.reply})
         log(logger, "turn", intent=nlu.intent, kind=facts["kind"], outcome=facts.get("outcome"),
@@ -165,6 +175,8 @@ class Orchestrator:
 
         session.unknown_streak = session.unknown_streak + 1 if intent == "unknown" else 0
 
+        if intent == "ask_identity":
+            return self._facts("identity", intent, suggest="start")      # respuesta honesta: es un asistente virtual, no una persona
         if intent == "request_human":
             return self._handoff(session, "USER_REQUEST")
         if intent == "greeting":
@@ -398,6 +410,7 @@ class Orchestrator:
         else:
             facts = self._facts("closing", "closing")
         session.slots["ended"] = True
+        facts["variant"] = len(session.history) // 2
         reply = self._render(facts, session.language)
         session.history.append({"role": "assistant", "text": reply.reply})
         return reply
@@ -442,7 +455,7 @@ class Orchestrator:
         if self.outbox is None:
             return None
         lang = session.language
-        values = {**fmt, "months_text": f"{fmt['months']}", "dti_text": f"{fmt['dti']} (max. {fmt['max_dti']})"}
+        values = {**fmt, "months_text": f"{fmt['months']} meses", "dti_text": f"{fmt['dti']} (max. {fmt['max_dti']})"}
         rows = [(label, values[key]) for key, label in templates.SUMMARY_LABELS[lang]]
         notes = list(templates.PDF_NOTES[lang])
         fx = self._fx_note(session).strip()

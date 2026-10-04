@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from app.agent.language import detect_language, norm, parse_amounts, parse_months
 
 Intent = Literal["credit_eligibility", "credit_offers", "update_income", "request_human", "greeting", "thanks",
-                 "closing", "other_topic", "confirm_yes", "confirm_no", "unknown"]
+                 "closing", "other_topic", "ask_identity", "confirm_yes", "confirm_no", "unknown"]
 Product = Literal["personal_loan", "credit_card", "mortgage"]
 Sentiment = Literal["positive", "neutral", "negative"]
 
@@ -33,6 +33,11 @@ class NLUResult(BaseModel):
 _HUMAN = re.compile(r"\b(agente|asesor|ejecutiv[oa]|humano|persona real|atendente|operador|falar com|hablar con)\b|"
                     r"\b(atienda|atender|atendido|hablar|falar|comunica|comunicar|pasame|pasar|conecta|transferir)\b.{0,30}"
                     r"\b(persona|pessoa|humano|asesor|ejecutivo)\b")
+# Pregunta por la naturaleza de quien atiende ("¿eres un robot?", "¿hablo con una persona?"). Se evalua ANTES que la peticion
+# de un humano: "hablo con" (pregunta) no es "hablar con" (peticion).
+_IDENTITY = re.compile(r"\b(eres|sos|es usted|usted es|tu eres|voce e|voce eh|vc e|hablo con|estoy hablando con|falo com|estou falando com)\b"
+                       r".{0,40}\b(robot|bot|chatbot|maquina|ia|inteligencia artificial|humano|humana|persona|pessoa|robo|programa|real)\b"
+                       r"|\bcon quien hablo\b|\bcom quem (falo|estou falando)\b|\bes (un|una) (robot|bot|persona|maquina)\b")
 HUMAN_REQUEST = _HUMAN  # peticion EXPLICITA de hablar con una persona; el LLM no puede inferirla
 _INCOME = re.compile(r"\b(gano|ganamos|ganho|cobro|sueldo|salario|ingresos?|renda|rendimento)\b")
 _CREDIT = re.compile(r"(credit|prestamo|prestad|prestar|emprestimo|emprestad|emprestar|financiar|financiamento|hipotec)")
@@ -74,6 +79,8 @@ class MockNLU:
         sentiment: Sentiment | None = "negative" if _NEGATIVE.search(t) else None
         base = dict(language=lang, months=parse_months(message), sentiment=sentiment, sensitive_topic=sensitive)
 
+        if _IDENTITY.search(t):                          # "robot"/"robô" contiene "robo" (robo = hurto): no es un tema sensible
+            return NLUResult(intent="ask_identity", **{**base, "sensitive_topic": False})
         if _HUMAN.search(t):
             return NLUResult(intent="request_human", **base)
         if _INCOME.search(t) and amounts:

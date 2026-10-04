@@ -67,10 +67,11 @@ def test_llm_cannot_rewrite_credit_decisions_or_offers(client, state):
 
 def test_low_risk_messages_may_be_rewritten_but_not_with_foreign_numbers(client, state):
     sid, h = _session(client, state)
-    state.orchestrator.llm = MisbehavingLLM(NLUResult(intent="greeting"), rewrite="Buenas, lo atiendo con gusto.")
-    assert say(client, sid, h, "hola")["reply"] == "Buenas, lo atiendo con gusto."
-    state.orchestrator.llm = MisbehavingLLM(NLUResult(intent="thanks"), rewrite="De nada. Tiene un bono de 5000.")
-    assert "5000" not in say(client, sid, h, "gracias")["reply"]            # numero ajeno a los hechos: se descarta
+    state.orchestrator.llm = MisbehavingLLM(NLUResult(intent="unknown"), rewrite="Disculpe, ¿me lo puede repetir?")
+    assert say(client, sid, h, "asdf")["reply"] == "Disculpe, ¿me lo puede repetir?"      # 'unknown' es de bajo riesgo
+    sid2, h2 = _session(client, state)
+    state.orchestrator.llm = MisbehavingLLM(NLUResult(intent="unknown"), rewrite="Disculpe. Tiene un bono de 5000.")
+    assert "5000" not in say(client, sid2, h2, "asdf")["reply"]                            # numero ajeno a los hechos: se descarta
 
 
 def test_llm_failure_falls_back_to_rules_without_breaking_the_turn(client, state):

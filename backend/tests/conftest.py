@@ -14,8 +14,8 @@ def make_settings(**kw) -> Settings:
 
 
 @pytest.fixture()
-def app():
-    return create_app(make_settings())
+def app(tmp_path):
+    return create_app(make_settings(outbox_dir=tmp_path / "outbox"))      # PDFs de cada prueba en su propia carpeta
 
 
 @pytest.fixture()

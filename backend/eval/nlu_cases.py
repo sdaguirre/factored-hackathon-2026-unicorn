@@ -63,6 +63,12 @@ CASES: list[tuple[str, str, str, bool]] = [
     ("creo que me clonaron la tarjeta", "other_topic", "es", True),
     ("quero contestar uma cobrança indevida", "other_topic", "pt", True),
     ("estoy muy enojado, llevo semanas con un reclamo sin respuesta", "other_topic", "es", True),
+    # ask_identity: pregunta quien o que atiende (la respuesta debe ser honesta)
+    ("¿eres un robot?", "ask_identity", "es", False),
+    ("¿hablo con una persona real?", "ask_identity", "es", False),
+    ("¿con quién hablo?", "ask_identity", "es", False),
+    ("você é um robô?", "ask_identity", "pt", False),
+    ("estou falando com uma pessoa?", "ask_identity", "pt", False),
     # confirmaciones
     ("sí, por favor", "confirm_yes", "es", False),
     ("claro que sí", "confirm_yes", "es", False),

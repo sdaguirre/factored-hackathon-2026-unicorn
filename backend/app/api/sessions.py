@@ -70,7 +70,7 @@ def verify(body: VerifyRequest, session: Session = Depends(require_session),
         session.customer_id, session.first_name, session.country = c.customer_id, c.first_name, c.country
         session.state, session.challenge = AUTHENTICATED, None
         state.lockout.register_success(session.doc_key)
-        greeting = templates.render("greeting", session.language, {"first_name": c.first_name})
+        greeting = templates.render("welcome", session.language, {"first_name": c.first_name})
         return VerifyResponse(status="authenticated", attempts_left=s.auth_max_attempts - session.auth_attempts_used,
                               greeting=greeting, suggested_replies=templates.SUGGESTIONS["start"][session.language])
 
