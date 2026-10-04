@@ -404,63 +404,59 @@ SELECT 'transactions',
 -- si en el futuro llega un CSV con datos duplicados, el notebook falla
 -- en rojo acá mismo en vez de dejar pasar silver corrupto a gold.
 --
--- Guarda el resultado en una vista temporal que lee la celda de Python
--- de abajo (es la única parte en Python del archivo, a propósito
--- mínima: lo demás sigue en SQL).
+-- SQL puro (raise_error) para que el notebook entero pueda correr en un
+-- SQL warehouse, también como tarea de un Job: si falla, el Job queda
+-- marcado como FALLIDO y las tareas de gold que dependen de esta no corren.
 -- COMMAND ----------
 
-CREATE OR REPLACE TEMP VIEW _dq_duplicate_check AS
-SELECT 'branches' AS tabla, COUNT(*) AS claves_duplicadas
-FROM (SELECT branch_id FROM workspace.silver_latam_bank_test.branches GROUP BY branch_id HAVING COUNT(*) > 1)
-UNION ALL
-SELECT 'call_center_interactions', COUNT(*) FROM (
-    SELECT interaction_id FROM workspace.silver_latam_bank_test.call_center_interactions
-    GROUP BY interaction_id HAVING COUNT(*) > 1)
-UNION ALL
-SELECT 'campaign_sends', COUNT(*) FROM (
-    SELECT send_id FROM workspace.silver_latam_bank_test.campaign_sends
-    GROUP BY send_id HAVING COUNT(*) > 1)
-UNION ALL
-SELECT 'complaints', COUNT(*) FROM (
-    SELECT complaint_id FROM workspace.silver_latam_bank_test.complaints
-    GROUP BY complaint_id HAVING COUNT(*) > 1)
-UNION ALL
-SELECT 'customers', COUNT(*) FROM (
-    SELECT customer_id FROM workspace.silver_latam_bank_test.customers
-    GROUP BY customer_id HAVING COUNT(*) > 1)
-UNION ALL
-SELECT 'daily_exchange_rates', COUNT(*) FROM (
-    SELECT source_currency, target_currency, date FROM workspace.silver_latam_bank_test.daily_exchange_rates
-    GROUP BY source_currency, target_currency, date HAVING COUNT(*) > 1)
-UNION ALL
-SELECT 'marketing_campaigns', COUNT(*) FROM (
-    SELECT campaign_id FROM workspace.silver_latam_bank_test.marketing_campaigns
-    GROUP BY campaign_id HAVING COUNT(*) > 1)
-UNION ALL
-SELECT 'products', COUNT(*) FROM (
-    SELECT product_id FROM workspace.silver_latam_bank_test.products
-    GROUP BY product_id HAVING COUNT(*) > 1)
-UNION ALL
-SELECT 'service_agents', COUNT(*) FROM (
-    SELECT agent_id FROM workspace.silver_latam_bank_test.service_agents
-    GROUP BY agent_id HAVING COUNT(*) > 1)
-UNION ALL
-SELECT 'transactions', COUNT(*) FROM (
-    SELECT transaction_id FROM workspace.silver_latam_bank_test.transactions
-    GROUP BY transaction_id HAVING COUNT(*) > 1);
-
-SELECT * FROM _dq_duplicate_check;
-
--- COMMAND ----------
-
--- MAGIC %python
--- MAGIC # Única celda en Python del notebook, a propósito chica: lee el
--- MAGIC # resultado de la vista temporal de arriba y corta la ejecución
--- MAGIC # si encuentra algún duplicado. Si este notebook se programa como
--- MAGIC # Job más adelante, esto hace que el Job quede marcado como
--- MAGIC # FALLIDO en vez de avanzar con datos malos a gold.
--- MAGIC rows = spark.sql("SELECT * FROM _dq_duplicate_check WHERE claves_duplicadas > 0").collect()
--- MAGIC if rows:
--- MAGIC     detalle = ", ".join(f"{r['tabla']} ({r['claves_duplicadas']} claves)" for r in rows)
--- MAGIC     raise Exception(f"GATE DE CALIDAD FALLÓ: duplicados reales encontrados en: {detalle}")
--- MAGIC print("Gate de calidad OK: sin duplicados reales en ninguna tabla silver.")
+WITH dq AS (
+    SELECT 'branches' AS tabla, COUNT(*) AS claves_duplicadas
+    FROM (SELECT branch_id FROM workspace.silver_latam_bank_test.branches GROUP BY branch_id HAVING COUNT(*) > 1)
+    UNION ALL
+    SELECT 'call_center_interactions', COUNT(*) FROM (
+        SELECT interaction_id FROM workspace.silver_latam_bank_test.call_center_interactions
+        GROUP BY interaction_id HAVING COUNT(*) > 1)
+    UNION ALL
+    SELECT 'campaign_sends', COUNT(*) FROM (
+        SELECT send_id FROM workspace.silver_latam_bank_test.campaign_sends
+        GROUP BY send_id HAVING COUNT(*) > 1)
+    UNION ALL
+    SELECT 'complaints', COUNT(*) FROM (
+        SELECT complaint_id FROM workspace.silver_latam_bank_test.complaints
+        GROUP BY complaint_id HAVING COUNT(*) > 1)
+    UNION ALL
+    SELECT 'customers', COUNT(*) FROM (
+        SELECT customer_id FROM workspace.silver_latam_bank_test.customers
+        GROUP BY customer_id HAVING COUNT(*) > 1)
+    UNION ALL
+    SELECT 'daily_exchange_rates', COUNT(*) FROM (
+        SELECT source_currency, target_currency, date FROM workspace.silver_latam_bank_test.daily_exchange_rates
+        GROUP BY source_currency, target_currency, date HAVING COUNT(*) > 1)
+    UNION ALL
+    SELECT 'marketing_campaigns', COUNT(*) FROM (
+        SELECT campaign_id FROM workspace.silver_latam_bank_test.marketing_campaigns
+        GROUP BY campaign_id HAVING COUNT(*) > 1)
+    UNION ALL
+    SELECT 'products', COUNT(*) FROM (
+        SELECT product_id FROM workspace.silver_latam_bank_test.products
+        GROUP BY product_id HAVING COUNT(*) > 1)
+    UNION ALL
+    SELECT 'service_agents', COUNT(*) FROM (
+        SELECT agent_id FROM workspace.silver_latam_bank_test.service_agents
+        GROUP BY agent_id HAVING COUNT(*) > 1)
+    UNION ALL
+    SELECT 'transactions', COUNT(*) FROM (
+        SELECT transaction_id FROM workspace.silver_latam_bank_test.transactions
+        GROUP BY transaction_id HAVING COUNT(*) > 1)
+)
+SELECT
+    CASE
+        WHEN SUM(claves_duplicadas) > 0 THEN raise_error(concat(
+            'GATE DE CALIDAD FALLÓ: duplicados reales encontrados en: ',
+            array_join(collect_list(
+                CASE WHEN claves_duplicadas > 0
+                     THEN concat(tabla, ' (', CAST(claves_duplicadas AS STRING), ' claves)') END
+            ), ', ')))
+        ELSE 'Gate de calidad OK: sin duplicados reales en ninguna tabla silver.'
+    END AS resultado
+FROM dq;
