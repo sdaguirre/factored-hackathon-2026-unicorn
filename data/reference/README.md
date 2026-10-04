@@ -48,3 +48,14 @@ Credit card tiers (Classic, Gold, Platinum, Black). **Synthetic.** Derivation in
 `ref_term_grid`. Each tier takes a slice of the observed credit limits
 (`limit_from_pct`–`limit_to_pct`, a 40/30/20/10 customer pyramid) and the observed rate at
 percentile `rate_pct` (Classic p80 → Black p20, so higher tiers get lower rates).
+
+## Credit policy (policy_version 0.2)
+`ref_policy_params.csv`, `ref_policy_bands.csv` and `ref_segment_adjustments.csv` hold the
+parameters of the credit rules in `docs/CREDIT_RULES.md`. **Synthetic.** The gold SQL and the
+rules service must read the same values.
+
+| File | Contents |
+|---|---|
+| `ref_policy_params.csv` | Scalars: 20% debt-to-income hard limit, hard-filter thresholds, offer validity, cutoff date, policy version |
+| `ref_policy_bands.csv` | Bands A–E by `credit_score` (fallback until the risk model exists), rate adjustment, whether an offer is allowed |
+| `ref_segment_adjustments.csv` | Rate adjustment by customer segment |

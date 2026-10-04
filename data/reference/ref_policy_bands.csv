@@ -1,0 +1,6 @@
+band,min_credit_score,rate_adjustment_pp,offer_allowed,is_synthetic
+A,740,-2.0,true,true
+B,680,-1.0,true,true
+C,620,0.0,true,true
+D,560,2.0,true,true
+E,0,0.0,false,true
