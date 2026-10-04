@@ -10,7 +10,7 @@ verifies documents and decides. Products in scope: credit card, personal loan an
 
 All parameters are synthetic and live in silver reference tables, loaded from `data/reference/`:
 `ref_policy_params`, `ref_policy_bands`, `ref_segment_adjustments`, `ref_term_grid` and
-`ref_product_catalog`. The gold SQL (`data/databricks/gold_credit_tables.sql`) and the rules
+`ref_product_catalog`. The gold SQL (`data/databricks/gold/`) and the rules
 service read the **same tables** and must apply the **same formulas** (section 4).
 
 ## 1. Hard filters
