@@ -64,3 +64,18 @@ rules service must read the same values.
 | `ref_policy_params.csv` | Scalars: 20% debt-to-income hard limit, hard-filter thresholds, offer validity, cutoff date, policy version |
 | `ref_policy_bands.csv` | Bands A–E by `credit_score` (fallback until the risk model exists): rate adjustment, maximum personal loan and mortgage term, whether an offer is allowed |
 | `ref_segment_adjustments.csv` | Rate adjustment by customer segment |
+
+## Loading to Databricks
+Reload silver only when a CSV changes:
+
+```bash
+pip install -r data/scripts/requirements.txt
+databricks auth login --host <workspace-url> --profile <profile>
+python data/scripts/load_reference.py --profile <profile> --warehouse-id <sql-warehouse-id>
+```
+
+The script uploads the loaded CSVs to `/Volumes/workspace/silver_latam_bank/reference/` and runs
+`data/databricks/load_silver_reference.sql`, which recreates `ref_product_catalog`,
+`ref_term_grid`, `ref_policy_params`, `ref_policy_bands` and `ref_segment_adjustments` with
+explicit types, column comments, `policy_version` and load metadata (`_source_file`,
+`_loaded_at`). The `databricks` CLI must be on `PATH` (the SDK uses it for OAuth).
