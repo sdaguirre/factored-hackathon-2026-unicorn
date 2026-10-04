@@ -53,8 +53,8 @@ CREATE OR REPLACE TABLE workspace.silver_latam_bank.ref_term_grid (
     term_months         INT     NOT NULL COMMENT 'Term in months (cards: 60 = card validity)',
     term_years          INT     NOT NULL COMMENT 'Term in years',
     reference_rate_pct  DOUBLE  NOT NULL COMMENT 'Reference nominal annual rate, percent',
-    min_amount_usd      INT     NOT NULL COMMENT 'Minimum amount / credit limit in USD for this row',
-    max_amount_usd      INT     NOT NULL COMMENT 'Maximum amount / credit limit in USD for this row',
+    min_amount_usd      INT     NOT NULL COMMENT 'Cards: tier minimum credit limit (USD). Loans: typical minimum amount for the term, used only to infer the term of existing loans',
+    max_amount_usd      INT     NOT NULL COMMENT 'Cards: tier maximum credit limit (USD). Loans: typical maximum amount for the term, used only to infer the term of existing loans',
     is_synthetic        BOOLEAN NOT NULL COMMENT 'Always true: team-defined data',
     policy_version      STRING  NOT NULL COMMENT 'Version of the reference data set',
     _source_file        STRING           COMMENT 'Volume file the row was loaded from',
@@ -73,7 +73,7 @@ FROM read_files(
 );
 
 -- =============================================================================================
--- Credit policy parameters (policy_version 0.2). Read by the gold SQL and by the rules service,
+-- Credit policy parameters (policy_version 0.3). Read by the gold SQL and by the rules service,
 -- so both compute offers with the same values. See docs/CREDIT_RULES.md.
 -- =============================================================================================
 CREATE OR REPLACE TABLE workspace.silver_latam_bank.ref_policy_params (
@@ -90,7 +90,7 @@ COMMENT 'SYNTHETIC scalar credit policy parameters: 20% debt-to-income hard limi
 
 INSERT INTO workspace.silver_latam_bank.ref_policy_params
 SELECT param_name, param_value, unit, description, is_synthetic,
-       '0.2', _metadata.file_path, current_timestamp()
+       '0.3', _metadata.file_path, current_timestamp()
 FROM read_files(
     '/Volumes/workspace/silver_latam_bank/reference/ref_policy_params.csv',
     format => 'csv', header => true,
@@ -103,20 +103,23 @@ CREATE OR REPLACE TABLE workspace.silver_latam_bank.ref_policy_bands (
     min_credit_score   INT     NOT NULL COMMENT 'Minimum credit_score for the band (score fallback until the risk model exists)',
     rate_adjustment_pp DOUBLE  NOT NULL COMMENT 'Percentage points added to the reference rate',
     offer_allowed      BOOLEAN NOT NULL COMMENT 'False for band E: no automatic offer',
+    max_term_personal_loan_months INT NOT NULL COMMENT 'Longest personal loan term the band can take',
+    max_term_mortgage_months      INT NOT NULL COMMENT 'Longest mortgage term the band can take',
     is_synthetic       BOOLEAN NOT NULL COMMENT 'Always true: team-defined policy',
     policy_version     STRING  NOT NULL COMMENT 'Version of the policy data set',
     _source_file       STRING           COMMENT 'Volume file the row was loaded from',
     _loaded_at         TIMESTAMP        COMMENT 'Load timestamp'
 )
-COMMENT 'SYNTHETIC risk bands by credit_score: eligibility (band E has no offer) and rate adjustment. Static: loaded from data/reference/ref_policy_bands.csv.';
+COMMENT 'SYNTHETIC risk bands by credit_score: eligibility (band E has no offer), rate adjustment and maximum loan terms (risk limits the term, not the amount). Static: loaded from data/reference/ref_policy_bands.csv.';
 
 INSERT INTO workspace.silver_latam_bank.ref_policy_bands
-SELECT band, min_credit_score, rate_adjustment_pp, offer_allowed, is_synthetic,
-       '0.2', _metadata.file_path, current_timestamp()
+SELECT band, min_credit_score, rate_adjustment_pp, offer_allowed,
+       max_term_personal_loan_months, max_term_mortgage_months, is_synthetic,
+       '0.3', _metadata.file_path, current_timestamp()
 FROM read_files(
     '/Volumes/workspace/silver_latam_bank/reference/ref_policy_bands.csv',
     format => 'csv', header => true,
-    schema => 'band STRING, min_credit_score INT, rate_adjustment_pp DOUBLE, offer_allowed BOOLEAN, is_synthetic BOOLEAN'
+    schema => 'band STRING, min_credit_score INT, rate_adjustment_pp DOUBLE, offer_allowed BOOLEAN, max_term_personal_loan_months INT, max_term_mortgage_months INT, is_synthetic BOOLEAN'
 );
 
 -- ---------------------------------------------------------------------------------------------
@@ -132,7 +135,7 @@ COMMENT 'SYNTHETIC rate adjustment by customer segment. Static: loaded from data
 
 INSERT INTO workspace.silver_latam_bank.ref_segment_adjustments
 SELECT segment, rate_adjustment_pp, is_synthetic,
-       '0.2', _metadata.file_path, current_timestamp()
+       '0.3', _metadata.file_path, current_timestamp()
 FROM read_files(
     '/Volumes/workspace/silver_latam_bank/reference/ref_segment_adjustments.csv',
     format => 'csv', header => true,
