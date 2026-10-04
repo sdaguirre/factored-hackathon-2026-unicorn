@@ -6,4 +6,4 @@ min_income_usd,300,USD/month,R05 minimum monthly income,true
 fraud_lookback_days,90,days,R07 window for confirmed fraud transactions,true
 offer_validity_days,30,days,Days an accepted offer stays valid,true
 as_of_date,2026-06-30,date,Serving cutoff date for all indicators,true
-policy_version,0.2,text,Version of the credit policy parameters,true
+policy_version,0.3,text,Version of the credit policy parameters,true

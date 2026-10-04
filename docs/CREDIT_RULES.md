@@ -1,6 +1,6 @@
-# Credit rules (synthetic, policy version 0.2)
+# Credit rules (synthetic, policy version 0.3)
 
-> Policy 0.2 is the reference version of the credit rules. Earlier components
+> Policy 0.3 is the reference version of the credit rules. Earlier components
 > (`backend/policy/credit_policy.yaml`, gold views) were built on preliminary versions so the
 > team could move in parallel; they are aligned to this version in follow-up PRs.
 
@@ -29,9 +29,10 @@ If any fails, there is no automatic offer and the reason code is returned.
 
 `R05_INCOME_MISSING` is recoverable: the agent can ask the customer for their income and the
 rules service recalculates (offer becomes conditional, flag `F03`).
-Complaints do not block the offer. An open High/Critical complaint sets
-`requires_advisor_review`; an open Critical complaint also removes the proactive offer
-(section 7). How much complaints should weigh on eligibility beyond this is still open.
+Complaints never change the amount or the rate and do not block the offer. An open
+High/Critical complaint sets `requires_advisor_review`; an open Critical complaint also
+removes the proactive offer (section 7); and every accepted offer records the open complaints
+and flag `F04` for the advisor (section 6).
 
 ## 2. Debt capacity: the 20% hard limit
 - **Income used** = declared monthly income from `customers`, converted to USD at the cutoff
@@ -49,21 +50,29 @@ Complaints do not block the offer. An open High/Critical complaint sets
 - **Maximum total installment** = `max_debt_to_income` (20%) × income used.
 - **Available installment** = maximum total installment − current installments.
 
+Only **current** credits count as existing debt: active credit cards, personal loans and
+mortgages. Closed products do not count. Offers are proposals, not debt: neither the other
+options shown nor offers already accepted in the chat (`credit_offers`) are subtracted, since
+they only become credits after the advisor formalizes them.
+
 The new installment can never exceed the available installment: after the offer, all
-installments together stay at or below 20% of income. There are no other amount or term caps
-by band; the amount is bounded only by capacity and by the `ref_term_grid` row range.
+installments together stay at or below 20% of income. The amount is bounded by capacity and by
+the product range; the term by the band (section 3).
 
 ## 3. Risk band and rate
 The band will come from the risk model's probability of default. Until the model exists,
 it comes from `credit_score` (`ref_policy_bands`):
 
-| Band | Score | Rate adjustment | Offer |
-|---|---|---|---|
-| A | 740 or more | −2.0 pp | yes |
-| B | 680–739 | −1.0 pp | yes |
-| C | 620–679 | 0 | yes |
-| D | 560–619 | +2.0 pp | yes |
-| E | below 560 | — | no |
+| Band | Score | Rate adjustment | Max term personal loan | Max term mortgage | Offer |
+|---|---|---|---|---|---|
+| A | 740 or more | −2.0 pp | 60 months | 30 years | yes |
+| B | 680–739 | −1.0 pp | 60 months | 30 years | yes |
+| C | 620–679 | 0 | 48 months | 25 years | yes |
+| D | 560–619 | +2.0 pp | 36 months | 20 years | yes |
+| E | below 560 | — | — | — | no |
+
+Risk limits the term, not the amount: a riskier band gets a higher rate and shorter maximum
+terms. Credit cards always have the 5-year card term.
 
 Segment adjustment (`ref_segment_adjustments`): Premium −1.0 pp, Plus −0.5 pp, Basic 0,
 Student +1.0 pp.
@@ -76,10 +85,20 @@ With `r = annual_rate_pct / 1200` and `n = term_months`:
 - `monthly_installment(P) = P · r / (1 − (1 + r)^−n)` (`fn_monthly_installment`)
 - `max_principal(I) = I · (1 − (1 + r)^−n) / r` (`fn_max_principal`)
 
+Options are **alternatives** ("this or that"), never added together: each option uses the
+whole available installment on its own.
+
 For each `ref_term_grid` option (loan term or card tier):
+- loans: the term must be ≤ the band's maximum term for the product; the amount range is the
+  whole product range of `ref_product_catalog` (5,000–150,000 USD for personal loans and
+  mortgages), at any allowed term;
+- cards: the amount range is the tier's credit limit range in `ref_term_grid`;
 - maximum amount by capacity = `max_principal(available installment)` at the offer rate;
-- offer maximum = min(capacity amount, option `max_amount_usd`), rounded down to 100 USD;
-- the option is available only if the offer maximum ≥ option `min_amount_usd`.
+- offer maximum = min(capacity amount, range maximum), rounded down to 100 USD;
+- the option is available only if the offer maximum ≥ range minimum.
+
+The loan amount ranges per term in `ref_term_grid` are typical ranges: they are only used to
+infer the term of the customer's existing loans (section 2), not to restrict new offers.
 
 Cards use the same formulas with n = 60 (the limit is sized so that a full balance would be
 repaid within the card term).
@@ -103,8 +122,12 @@ The rules service starts from `gold.customer_credit_profile` and recomputes with
 | Paid off a loan at another bank | Only changes if that installment had been declared before |
 
 Advisor flags (they never block the handoff):
-- `F02` the new total debt-to-income is within 5% of the 20% limit (≥ 19%)
-- `F03` the offer relies on data declared in the chat
+- `F02_NEAR_LIMIT_DECLARED_INCOME` the new total debt-to-income is 19% or more **and** the
+  offer relies on income declared in the chat: a small error in that income would push the
+  customer over 20%. Offers at the maximum amount on income from the profile do not raise it.
+- `F03_DECLARED_DATA` the offer relies on data declared in the chat (income, household income,
+  external debt)
+- `F04_OPEN_COMPLAINTS` the customer has at least one open complaint at offer time
 
 ## 7. Proactive offers and marketing consent
 Offers are computed for every customer. `customer_credit_profile.offer_mode` says how the
@@ -127,13 +150,15 @@ offer time (all, High/Critical and Critical), flags, required documents, `offer_
 Every accepted offer is handed off to an advisor.
 
 ## Example
-Band C, Basic segment, income 2,500 USD, current installments 100 USD, personal loan 24 months
-(reference rate 15.2%, adjustment 0):
+Band C, Basic segment, income 2,500 USD from the profile, current installments 100 USD:
 - maximum total installment = 20% × 2,500 = 500; available = 400;
-- maximum amount = `max_principal(400)` = 8,233 → offer up to **8,200 USD**, installment 398.37;
-  total debt-to-income after = (100 + 398.37) / 2,500 = 19.9% (flag `F02`).
+- personal loan, 24 months at 15.2%: `max_principal(400)` = 8,233 → offer up to **8,200 USD**,
+  installment 398.37, total debt-to-income after (100 + 398.37) / 2,500 = 19.9%; no flag,
+  because the income comes from the profile;
+- or personal loan, 48 months (band C maximum) at 21.7%: offer up to **12,700 USD**, installment
+  398.06. A 60-month term is not available to band C.
 
-The customer adds 1,000 USD of household income: income 3,500, available 600, offer up to
-12,300 USD (flags `F02`, `F03`). The customer declares an external loan of 150 USD/month:
-available 250, offer up to 5,100 USD. In every case, if the customer proceeds, the offer is
-recorded and handed off to an advisor.
+The customer adds 1,000 USD of household income: income 3,500, available 600, 24-month offer up
+to 12,300 USD (flags `F02`, `F03`). The customer declares an external loan of 150 USD/month:
+available 250, 24-month offer up to 5,100 USD (flag `F03`). In every case, if the customer
+proceeds, the offer is recorded and handed off to an advisor.

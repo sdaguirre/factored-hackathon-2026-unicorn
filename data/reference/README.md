@@ -42,6 +42,11 @@ amount, score or product age:
 
 Amounts rounded to the nearest 1,000 USD and clamped to the catalog bounds; rates to one decimal.
 
+How the amounts are used (policy 0.3): for credit cards they are the tier's credit limit
+range. For loans they are a typical amount range per term, used only to infer the term of a
+customer's existing loans; new loan offers can use any amount in the product range at any
+term up to the band maximum (`ref_policy_bands`).
+
 ## ref_card_tiers.csv
 Credit card tiers (Classic, Gold, Platinum, Black). **Synthetic.** Derivation input for
 `derivation/07` only; not loaded to Databricks, since its result is already in
@@ -49,7 +54,7 @@ Credit card tiers (Classic, Gold, Platinum, Black). **Synthetic.** Derivation in
 (`limit_from_pct`–`limit_to_pct`, a 40/30/20/10 customer pyramid) and the observed rate at
 percentile `rate_pct` (Classic p80 → Black p20, so higher tiers get lower rates).
 
-## Credit policy (policy_version 0.2)
+## Credit policy (policy_version 0.3)
 `ref_policy_params.csv`, `ref_policy_bands.csv` and `ref_segment_adjustments.csv` hold the
 parameters of the credit rules in `docs/CREDIT_RULES.md`. **Synthetic.** The gold SQL and the
 rules service must read the same values.
@@ -57,5 +62,5 @@ rules service must read the same values.
 | File | Contents |
 |---|---|
 | `ref_policy_params.csv` | Scalars: 20% debt-to-income hard limit, hard-filter thresholds, offer validity, cutoff date, policy version |
-| `ref_policy_bands.csv` | Bands A–E by `credit_score` (fallback until the risk model exists), rate adjustment, whether an offer is allowed |
+| `ref_policy_bands.csv` | Bands A–E by `credit_score` (fallback until the risk model exists): rate adjustment, maximum personal loan and mortgage term, whether an offer is allowed |
 | `ref_segment_adjustments.csv` | Rate adjustment by customer segment |
