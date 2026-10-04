@@ -54,9 +54,15 @@ def test_llm_cannot_rewrite_credit_decisions_or_offers(client, state):
     r = say(client, sid, h, "quiero un préstamo de 1000 a 12 meses")
     assert r["outcome"] == "eligible" and "aprobado sin condiciones" not in r["reply"] and "simulación" in r["reply"]
     assert llm.compose_calls == []                                           # ni se le pidio reescribir una decision
+    # Con una propuesta ya evaluada, al despedirse llega el RESUMEN de esa propuesta (plantilla), no una oferta nueva
     state.orchestrator.llm = MisbehavingLLM(NLUResult(intent="closing"), rewrite="Hasta pronto.")
     r2 = say(client, sid, h, "gracias, eso es todo")
-    assert r2["proactive_offer"] is True and "preaprobación" in r2["reply"] and "Hasta pronto" not in r2["reply"]
+    assert r2["proactive_offer"] is False and r2["summary_ready"] is True and "Hasta pronto" not in r2["reply"]
+    # Sin propuesta previa, la oferta proactiva tampoco la reescribe el modelo
+    sid2, h2 = _session(client, state)
+    state.orchestrator.llm = MisbehavingLLM(NLUResult(intent="closing"), rewrite="Hasta pronto.")
+    r3 = say(client, sid2, h2, "gracias, eso es todo")
+    assert r3["proactive_offer"] is True and "preaprobación" in r3["reply"] and "Hasta pronto" not in r3["reply"]
 
 
 def test_low_risk_messages_may_be_rewritten_but_not_with_foreign_numbers(client, state):

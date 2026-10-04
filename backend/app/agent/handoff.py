@@ -17,6 +17,7 @@ def build_summary(session: Session, ticket_id: str, created_at: str, reason: str
                      "authenticated": True, "auth_method": "kba_transactions_and_account_opening"},
         "request": session.slots.get("pending_request"),
         "declared_income_unverified": session.slots.get("declared_income"),
+        "application": session.slots.get("application"),
         "verified_facts": session.slots.get("verified_facts", []),
         "evaluation": evaluation,
         "actions_taken": list(session.actions),

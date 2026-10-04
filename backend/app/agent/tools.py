@@ -84,6 +84,12 @@ class HandoffQueue:
         with self._lock:
             self.items.append(summary)
 
+    def update(self, ticket_id: str, **fields) -> None:
+        with self._lock:
+            for it in self.items:
+                if it["ticket_id"] == ticket_id:
+                    it.update(fields)
+
     def list(self) -> list[dict]:
         with self._lock:
             return list(self.items)

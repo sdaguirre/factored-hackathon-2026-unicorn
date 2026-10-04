@@ -15,13 +15,13 @@ REASON_TEXT = {
            "BORDERLINE_DTI": "su capacidad de pago está justo en el límite",
            "INCOME_UPLIFT_REVIEW": "el aumento de ingreso informado necesita verificación",
            "MISSING_DATA": "faltan datos para evaluarlo", "USER_REQUEST": "usted lo solicitó",
-           "UNSUPPORTED_PRODUCT": "ese producto lo atiende un asesor", "UNCLEAR": "no pude entender su consulta",
+           "UNSUPPORTED_PRODUCT": "ese producto lo atiende un asesor", "UNCLEAR": "no pude entender su consulta", "DOCS_INCOMPLETE": "falta documentación por completar",
            "OTHER_TOPIC": "ese tema lo atiende un asesor"},
     "pt": {"CUSTOMER_NOT_ACTIVE": "sua conta não está ativa", "DELINQUENT_REVIEW": "há pagamentos em atraso",
            "BORDERLINE_DTI": "sua capacidade de pagamento está no limite",
            "INCOME_UPLIFT_REVIEW": "o aumento de renda informado precisa de verificação",
            "MISSING_DATA": "faltam dados para a análise", "USER_REQUEST": "você solicitou",
-           "UNSUPPORTED_PRODUCT": "esse produto é atendido por um consultor", "UNCLEAR": "não consegui entender a consulta",
+           "UNSUPPORTED_PRODUCT": "esse produto é atendido por um consultor", "UNCLEAR": "não consegui entender a consulta", "DOCS_INCOMPLETE": "falta documentação a completar",
            "OTHER_TOPIC": "esse assunto é atendido por um consultor"},
 }
 
@@ -119,6 +119,50 @@ T: dict[str, dict[str, str]] = {
         "es": "En este momento no tengo una tasa de cambio disponible de {ccy} a su moneda. ¿Me indica el monto en su moneda local?",
         "pt": "No momento não tenho uma taxa de câmbio disponível de {ccy} para a sua moeda. Pode me informar o valor na sua moeda local?",
     },
+    "ask_proceed": {
+        "es": "¿Le gustaría que avancemos con la solicitud?",
+        "pt": "Gostaria que avançássemos com a solicitação?",
+    },
+    "proceed_declined": {
+        "es": "Sin problema. Si más adelante quiere retomarla, aquí estaré.",
+        "pt": "Sem problema. Se mais adiante quiser retomar, estarei por aqui.",
+    },
+    "docs_request": {
+        "es": "{lead}Para avanzar necesito que tenga a la mano: {docs}. ¿Cuenta con todos?",
+        "pt": "{lead}Para avançar preciso que você tenha em mãos: {docs}. Você tem todos?",
+    },
+    "docs_item": {
+        "es": "{lead}¿Cuenta con {doc}?",
+        "pt": "{lead}Você tem {doc}?",
+    },
+    "application_ready": {
+        "es": "Perfecto, ya tengo todo lo necesario. Pasé su solicitud a un asesor para la revisión final; su número de seguimiento es {ticket}. No tendrá que repetirle lo que ya me contó.",
+        "pt": "Perfeito, já tenho tudo o que preciso. Encaminhei sua solicitação a um consultor para a revisão final; seu número de acompanhamento é {ticket}. Você não precisará repetir o que já me contou.",
+    },
+    "docs_incomplete": {
+        "es": "Todavía me falta: {missing}. Puede enviarlo respondiendo al correo con el resumen, o llevarlo a una sucursal. ¿Quiere que un asesor lo contacte para ver cómo avanzar?",
+        "pt": "Ainda falta: {missing}. Você pode enviar respondendo ao e-mail com o resumo, ou levar a uma agência. Quer que um consultor entre em contato para ver como avançar?",
+    },
+    "closing_summary": {
+        "es": "Con gusto. Antes de despedirnos, le dejo el resumen de su propuesta:",
+        "pt": "Com prazer. Antes de nos despedirmos, deixo o resumo da sua proposta:",
+    },
+    "summary": {
+        "es": "• Producto: {product}\n• Monto: {amount}\n• Plazo: {months} meses\n• Tasa anual: {rate}\n• Cuota mensual estimada: {payment}\n• Endeudamiento con la cuota: {dti} de su ingreso (máximo {max_dti})\n• Estado: {status}\n• Documentación: {docs_status}{ticket_line}",
+        "pt": "• Produto: {product}\n• Valor: {amount}\n• Prazo: {months} meses\n• Taxa anual: {rate}\n• Parcela mensal estimada: {payment}\n• Endividamento com a parcela: {dti} da sua renda (máximo {max_dti})\n• Situação: {status}\n• Documentação: {docs_status}{ticket_line}",
+    },
+    "email_notice": {
+        "es": "Le enviaremos el detalle completo en un PDF al correo registrado ({email}). Es un resumen informativo: la aprobación final depende de la verificación del banco.",
+        "pt": "Enviaremos o detalhe completo em um PDF para o e-mail cadastrado ({email}). É um resumo informativo: a aprovação final depende da verificação do banco.",
+    },
+    "email_notice_noaddr": {
+        "es": "Le enviaremos el detalle completo en un PDF al correo que tenemos registrado. Es un resumen informativo: la aprobación final depende de la verificación del banco.",
+        "pt": "Enviaremos o detalhe completo em um PDF para o e-mail que temos cadastrado. É um resumo informativo: a aprovação final depende da verificação do banco.",
+    },
+    "goodbye": {
+        "es": "Quedo atento por si necesita algo más. ¡Que tenga un excelente día!",
+        "pt": "Fico à disposição se precisar de mais alguma coisa. Tenha um ótimo dia!",
+    },
     "closing": {
         "es": "Con gusto, que tenga un buen día.",
         "pt": "Por nada, tenha um bom dia.",
@@ -141,6 +185,39 @@ T: dict[str, dict[str, str]] = {
     },
 }
 
+DOC_NAME = {
+    "es": {"id_copy": "su copia del documento de identidad", "address_proof": "su comprobante de domicilio",
+           "income_proof": "su comprobante de ingresos", "bank_statements_3m": "sus estados de cuenta de los últimos 3 meses",
+           "property_deed": "la escritura de la propiedad", "appraisal": "el avalúo de la propiedad"},
+    "pt": {"id_copy": "sua cópia do documento de identidade", "address_proof": "seu comprovante de endereço",
+           "income_proof": "seu comprovante de renda", "bank_statements_3m": "seus extratos bancários dos últimos 3 meses",
+           "property_deed": "a escritura do imóvel", "appraisal": "a avaliação do imóvel"},
+}
+SUMMARY_TEXT = {
+    "es": {"eligible": "preliminarmente elegible", "provisional": "preliminarmente elegible, sujeta a verificación de ingresos",
+           "docs_complete": "completa; la revisará un asesor", "docs_pending": "pendiente: {missing}", "docs_not_started": "aún sin iniciar",
+           "ticket_line": "\n• Seguimiento: {ticket}"},
+    "pt": {"eligible": "preliminarmente elegível", "provisional": "preliminarmente elegível, sujeita à verificação de renda",
+           "docs_complete": "completa; um consultor fará a revisão", "docs_pending": "pendente: {missing}", "docs_not_started": "ainda não iniciada",
+           "ticket_line": "\n• Acompanhamento: {ticket}"},
+}
+REASK = {"es": "Perdone, no le entendí bien. ", "pt": "Desculpe, não entendi bem. "}
+SUMMARY_LABELS = {
+    "es": [("product", "Producto"), ("amount", "Monto"), ("months_text", "Plazo"), ("rate", "Tasa anual"),
+           ("payment", "Cuota mensual estimada"), ("dti_text", "Endeudamiento con la cuota"), ("status", "Estado"),
+           ("docs_status", "Documentación")],
+    "pt": [("product", "Produto"), ("amount", "Valor"), ("months_text", "Prazo"), ("rate", "Taxa anual"),
+           ("payment", "Parcela mensal estimada"), ("dti_text", "Endividamento com a parcela"), ("status", "Situação"),
+           ("docs_status", "Documentação")],
+}
+PDF_NOTES = {
+    "es": ["Simulación con datos y política sintéticos: no constituye una oferta ni una aprobación de crédito.",
+           "Las cifras están sujetas a la verificación de ingresos y documentos y a la aprobación final del banco."],
+    "pt": ["Simulação com dados e política sintéticos: não constitui uma oferta nem uma aprovação de crédito.",
+           "Os valores estão sujeitos à verificação de renda e documentos e à aprovação final do banco."],
+}
+EMAIL_SUBJECT = {"es": "Resumen de su propuesta de crédito", "pt": "Resumo da sua proposta de crédito"}
+
 SUGGESTIONS = {
     "yes_no": {"es": ["Sí", "No"], "pt": ["Sim", "Não"]},
     "start": {"es": ["Ver mi oferta de crédito", "Quiero un préstamo", "Hablar con un asesor"],
@@ -153,8 +230,18 @@ def render(kind: str, lang: str, fmt: dict[str, str]) -> str:
 
 
 def render_facts(facts: dict, lang: str) -> str:
-    """Texto base + (opcional) un segundo mensaje encadenado, p. ej. la oferta proactiva."""
+    """Texto base + (opcional) un segundo mensaje en la misma linea (p. ej. la pregunta de seguir) + bloques aparte."""
     text = render(facts["kind"], lang, facts["fmt"])
     if facts.get("kind2"):
         text += " " + render(facts["kind2"], lang, facts["fmt"])
+    for extra in facts.get("extras", []):
+        text += "\n\n" + render(extra, lang, facts["fmt"])
     return text
+
+
+def join_list(items: list[str], lang: str) -> str:
+    """'a, b y c' / 'a, b e c'."""
+    conj = {"es": "y", "pt": "e"}[lang]
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + f" {conj} {items[-1]}"

@@ -10,7 +10,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 
-from app.agent import money, proactive, templates
+from app.agent import documents, money, proactive, templates
 from app.agent.handoff import build_summary
 from app.agent.language import norm, parse_amounts, parse_months
 from app.agent.llm import LLM, MockLLM
@@ -18,6 +18,7 @@ from app.agent.nlu import HUMAN_REQUEST, NLUResult
 from app.agent.tools import (DEFAULT_MONTHS, SUPPORTED_PRODUCTS, HandoffQueue, ToolContext, evaluate_credit,
                              get_profile, new_ticket_id, offer_rates, utc_iso)
 from app.core.fmt import fmt_money, fmt_pct
+from app.core.pdf import render_summary_pdf
 from app.core.sessions import Session
 from app.logging_setup import log
 from app.policy import credit_engine as ce
@@ -41,6 +42,8 @@ class ChatReply:
     awaiting: str | None = None
     llm_rewritten: bool = False
     proactive_offer: bool = False
+    summary_ready: bool = False          # la respuesta incluye el resumen final de la propuesta
+    email: dict | None = None            # correo con el PDF (SIMULADO en el prototipo): {to, status, id}
 
 
 def _conv_dict(c: money.Conversion) -> dict:
@@ -79,8 +82,8 @@ def validate_nlu(nlu: NLUResult, message: str) -> NLUResult:
 
 class Orchestrator:
     def __init__(self, repo, policy: dict, llm: LLM, queue: HandoffQueue,
-                 rewrite_kinds: frozenset[str] = DEFAULT_REWRITE_KINDS):
-        self.repo, self.policy, self.llm, self.queue = repo, policy, llm, queue
+                 rewrite_kinds: frozenset[str] = DEFAULT_REWRITE_KINDS, outbox=None):
+        self.repo, self.policy, self.llm, self.queue, self.outbox = repo, policy, llm, queue, outbox
         self.rewrite_kinds = rewrite_kinds
         self._fallback = MockLLM()
 
@@ -143,6 +146,16 @@ class Orchestrator:
             if intent == "confirm_no":
                 session.slots["offer_declined"] = True
                 return self._facts("offer_declined", intent)
+        if awaiting == "proceed":
+            if intent == "confirm_yes":
+                return self._start_application(session, ctx)
+            if intent == "confirm_no":
+                session.slots["proceed_declined"] = True
+                return self._facts("proceed_declined", intent)
+        if awaiting in ("docs_all", "doc_item"):
+            reply = self._docs_answer(session, ctx, awaiting, intent)
+            if reply is not None:
+                return reply
         if awaiting == "amount" and amounts and intent in ("unknown", "credit_eligibility", "confirm_yes"):
             nlu = nlu.model_copy(update={"intent": "credit_eligibility", "amount": amounts[0]})
             intent = "credit_eligibility"
@@ -156,10 +169,8 @@ class Orchestrator:
             return self._handoff(session, "USER_REQUEST")
         if intent == "greeting":
             return self._facts("greeting", intent, first_name=session.first_name or "", suggest="start")
-        if intent == "thanks":
-            return self._with_offer(session, ctx, self._facts("thanks", intent))
-        if intent == "closing":
-            return self._with_offer(session, ctx, self._facts("closing", intent))
+        if intent in ("thanks", "closing"):
+            return self._close_turn(session, ctx, intent)
         if intent == "other_topic":
             return self._offer_handoff(session, "OTHER_TOPIC", intent, kind="other_topic")
         if intent == "credit_offers":
@@ -260,12 +271,16 @@ class Orchestrator:
         session.slots.setdefault("verified_facts", []).append({"type": "credit_evaluation", **evaluation})
         if d.outcome in (ce.ELIGIBLE, ce.ELIGIBLE_PROVISIONAL):
             p = self.policy
-            return self._facts(d.outcome, intent, outcome=d.outcome,
+            facts = self._facts(d.outcome, intent, outcome=d.outcome,
                                product=templates.PRODUCT_NAME[session.language][req["product"]],
                                amount=self._m(session, req["amount"], res.ccy), months=str(req["months"]),
                                payment=self._m(session, d.payment, res.ccy, 2), rate=fmt_pct(d.rate_pct),
                                dti=fmt_pct(d.dti_after * 100), max_dti=fmt_pct(p["max_dti"] * 100),
                                fx=self._fx_note(session))
+            facts["kind2"] = "ask_proceed"                      # "¿Le gustaria que avancemos con la solicitud?"
+            facts.update(awaiting="proceed", suggest="yes_no")
+            session.slots["awaiting"] = "proceed"
+            return facts
         return self._from_decision(session, intent, d, res.ccy, req)
 
     def _from_decision(self, session: Session, intent: str, d: ce.Decision, ccy: str, req: dict | None = None) -> dict:
@@ -288,6 +303,164 @@ class Orchestrator:
             return self._offer_handoff(session, "POLICY_DECLINED", intent, kind="declined_generic", outcome=d.outcome)
         return self._offer_handoff(session, reason or "MISSING_DATA", intent, kind="needs_review", outcome=d.outcome)
 
+    # ------------------------------------------------------------------ solicitud y documentos
+    def _doc_list(self, session: Session, ids: list[str]) -> str:
+        names = templates.DOC_NAME[session.language]
+        return templates.join_list([names[i] for i in ids], session.language)
+
+    def _start_application(self, session: Session, ctx: ToolContext) -> dict:
+        req = session.slots.get("pending_request") or {}
+        ev = session.slots.get("last_evaluation") or {}
+        if not req.get("amount") or ev.get("outcome") not in (ce.ELIGIBLE, ce.ELIGIBLE_PROVISIONAL):
+            return self._facts("unknown", "confirm_yes", suggest="start")
+        plan = documents.plan(self.policy, self.repo, ctx.customer_id, req["product"],
+                              bool(ev.get("income_declared_unverified")))
+        session.slots["application"] = {"status": "documents", "product": req["product"], "required": plan.required,
+                                        "on_file": plan.on_file, "need": plan.need, "declared": [], "missing": [],
+                                        "queue": [], "current": None}
+        session.actions.append({"type": "application_started", "required": plan.required, "on_file": plan.on_file,
+                                "verified": True})
+        if not plan.need:                                        # el banco ya tiene todo lo necesario
+            return self._finish_application(session, ctx)
+        session.slots["awaiting"] = "docs_all"
+        return self._facts("docs_request", "credit_eligibility", awaiting="docs_all", suggest="yes_no",
+                           docs=self._doc_list(session, plan.need), lead="")
+
+    def _docs_answer(self, session: Session, ctx: ToolContext, awaiting: str, intent: str) -> dict | None:
+        """Responde a la pregunta de documentos. None = que siga el flujo general (pidio un asesor, se despide, etc.)."""
+        app = session.slots.get("application")
+        if not app or intent in ("request_human", "closing", "thanks", "other_topic", "greeting"):
+            return None
+        if intent not in ("confirm_yes", "confirm_no"):          # no entendio: se repite la misma pregunta
+            session.slots["awaiting"] = awaiting
+            lead = templates.REASK[session.language]
+            if awaiting == "docs_all":
+                return self._facts("docs_request", intent, awaiting="docs_all", suggest="yes_no", lead=lead,
+                                   docs=self._doc_list(session, app["need"]))
+            return self._facts("docs_item", intent, awaiting="doc_item", suggest="yes_no", lead=lead,
+                               doc=self._doc_list(session, [app["current"]]))
+        if awaiting == "docs_all":
+            if intent == "confirm_yes":
+                app["declared"] = list(app["need"])
+                return self._finish_application(session, ctx)
+            if len(app["need"]) == 1:                            # un solo documento y dijo que no: no se repite la pregunta
+                return self._finish_application(session, ctx)
+            app["queue"] = list(app["need"])                     # "no": se pregunta uno por uno
+            return self._next_doc(session, ctx)
+        (app["declared"] if intent == "confirm_yes" else app["missing"]).append(app["current"])
+        return self._next_doc(session, ctx)
+
+    def _next_doc(self, session: Session, ctx: ToolContext) -> dict:
+        app = session.slots["application"]
+        if not app["queue"]:
+            return self._finish_application(session, ctx)
+        app["current"] = app["queue"].pop(0)
+        session.slots["awaiting"] = "doc_item"
+        return self._facts("docs_item", "confirm_no", awaiting="doc_item", suggest="yes_no", lead="",
+                           doc=self._doc_list(session, [app["current"]]))
+
+    def _finish_application(self, session: Session, ctx: ToolContext) -> dict:
+        app = session.slots["application"]
+        app["missing"] = [d for d in app["need"] if d not in app["declared"]]
+        if app["missing"]:
+            app["status"] = "incomplete"
+            session.actions.append({"type": "documents_pending", "missing": app["missing"], "verified": True})
+            session.slots["awaiting"] = "confirm_handoff"
+            session.slots["handoff_reason"] = "DOCS_INCOMPLETE"
+            return self._facts("docs_incomplete", "confirm_no", awaiting="confirm_handoff", suggest="yes_no",
+                               missing=self._doc_list(session, app["missing"]))
+        app["status"] = "ready"
+        facts = self._handoff(session, "APPLICATION_READY")      # todo en orden: se deriva a un asesor
+        if facts["kind"] == "handoff_created":
+            facts["kind"] = "application_ready"
+        return self._with_conclusion(session, ctx, facts)
+
+    # ------------------------------------------------------------------ resumen final y correo
+    @staticmethod
+    def _has_proposal(session: Session) -> bool:
+        ev = session.slots.get("last_evaluation") or {}
+        return ev.get("outcome") in (ce.ELIGIBLE, ce.ELIGIBLE_PROVISIONAL) and bool(session.slots.get("pending_request"))
+
+    def _close_turn(self, session: Session, ctx: ToolContext, intent: str) -> dict:
+        if self._has_proposal(session) and not session.slots.get("summary_delivered"):
+            facts = self._with_conclusion(session, ctx, self._facts("closing_summary", intent))
+            facts["extras"].append("goodbye")
+            return facts
+        base = self._facts(intent, intent)
+        return base if self._has_proposal(session) else self._with_offer(session, ctx, base)
+
+    def conclude(self, session: Session) -> ChatReply:
+        """Cierre explicito de la conversacion (POST /end): resumen y aviso de correo si hay una propuesta."""
+        ctx = ToolContext(session.customer_id, self.repo, self.policy)
+        if self._has_proposal(session) and not session.slots.get("summary_delivered"):
+            facts = self._with_conclusion(session, ctx, self._facts("closing_summary", "closing"))
+            facts["extras"].append("goodbye")
+        else:
+            facts = self._facts("closing", "closing")
+        session.slots["ended"] = True
+        reply = self._render(facts, session.language)
+        session.history.append({"role": "assistant", "text": reply.reply})
+        return reply
+
+    def _summary_fmt(self, session: Session, ctx: ToolContext) -> dict[str, str]:
+        lang, req, ev = session.language, session.slots["pending_request"], session.slots["last_evaluation"]
+        ccy = get_profile(ctx)["income_ccy"]
+        tx, app = templates.SUMMARY_TEXT[lang], session.slots.get("application") or {}
+        if app.get("status") == "ready":
+            docs_status = tx["docs_complete"]
+        elif app.get("status") == "incomplete":
+            docs_status = tx["docs_pending"].format(missing=self._doc_list(session, app["missing"]))
+        else:
+            docs_status = tx["docs_not_started"]
+        ticket = session.handoff["ticket_id"] if session.handoff else ""
+        email = self.repo.contact_email_masked(ctx.customer_id) or ""
+        months = str(req["months"])
+        return {
+            "product": templates.PRODUCT_NAME[lang][req["product"]], "amount": self._m(session, req["amount"], ccy),
+            "months": months, "rate": fmt_pct(ev["rate_pct"]), "payment": self._m(session, ev["payment"], ccy, 2),
+            "dti": fmt_pct(ev["dti_after"] * 100), "max_dti": fmt_pct(self.policy["max_dti"] * 100),
+            "status": tx["provisional"] if ev["outcome"] == ce.ELIGIBLE_PROVISIONAL else tx["eligible"],
+            "docs_status": docs_status, "ticket": ticket, "ticket_line": tx["ticket_line"].format(ticket=ticket) if ticket else "",
+            "email": email,
+        }
+
+    def _with_conclusion(self, session: Session, ctx: ToolContext, facts: dict) -> dict:
+        """Agrega el resumen de la propuesta y el aviso de que el detalle se envia por correo en un PDF."""
+        if session.slots.get("summary_delivered") or not self._has_proposal(session):
+            return facts
+        fmt = self._summary_fmt(session, ctx)
+        facts["fmt"].update(fmt)
+        facts["extras"] = ["summary", "email_notice" if fmt["email"] else "email_notice_noaddr"]
+        facts["summary"] = True
+        record = self._queue_email(session, ctx, fmt)
+        if record:
+            facts["email"] = {"to": fmt["email"] or None, "status": record["status"], "id": record["id"]}
+        session.slots["summary_delivered"] = True
+        return facts
+
+    def _queue_email(self, session: Session, ctx: ToolContext, fmt: dict[str, str]) -> dict | None:
+        if self.outbox is None:
+            return None
+        lang = session.language
+        values = {**fmt, "months_text": f"{fmt['months']}", "dti_text": f"{fmt['dti']} (max. {fmt['max_dti']})"}
+        rows = [(label, values[key]) for key, label in templates.SUMMARY_LABELS[lang]]
+        notes = list(templates.PDF_NOTES[lang])
+        fx = self._fx_note(session).strip()
+        if fx:
+            notes.insert(0, fx)
+        pdf = render_summary_pdf(lang=lang, first_name=session.first_name or "", rows=rows, notes=notes,
+                                 ticket=fmt["ticket"] or None, policy_version=self.policy["version"])
+        record = self.outbox.queue(customer_id=ctx.customer_id, to_masked=fmt["email"] or None,
+                                   subject=templates.EMAIL_SUBJECT[lang], pdf=pdf, language=lang,
+                                   ticket_id=fmt["ticket"] or None)
+        session.slots["summary_email"] = record
+        session.actions.append({"type": "summary_email_queued", "email_id": record["id"], "status": record["status"],
+                                "to_masked": record["to_masked"], "verified": True})
+        if session.handoff:                                      # el agente humano ve el resumen y el correo en su ticket
+            self.queue.update(session.handoff["ticket_id"], offer_summary=fmt, summary_email=record,
+                              actions_taken=list(session.actions))
+        return record
+
     # ------------------------------------------------------------------ monedas
     def _to_local(self, session: Session, ctx: ToolContext, value: float, mention: money.CurrencyMention):
         """(valor en la moneda local, conversion o None, error o None). La politica trabaja en la moneda del ingreso."""
@@ -302,16 +475,17 @@ class Orchestrator:
         if conv is None:
             return value, None, spoken                    # sin tasa disponible: se avisa, no se inventa
         session.slots["spoken_ccy"] = spoken
+        # Los equivalentes se muestran con la MISMA tasa de esta conversion: las tasas directa e inversa del dataset no son
+        # exactamente reciprocas y, si no, pedir 1.000 USD se mostraria como "≈ 1.023 USD" al volver.
+        session.slots["spoken_fx"] = {"ccy": spoken, "local": local, "rate": conv.quote.rate}
         return conv.amount_dst, _conv_dict(conv), None
 
     def _m(self, session: Session, amount: float, ccy: str, decimals: int = 0) -> str:
         """Monto en la moneda local y, si el cliente habla en otra, su equivalente aproximado."""
         base = fmt_money(amount, ccy, decimals)
-        spoken = session.slots.get("spoken_ccy")
-        if spoken and spoken != ccy:
-            c = money.convert(self.repo, amount, ccy, spoken)
-            if c:
-                return f"{base} (≈ {fmt_money(c.amount_dst, spoken, decimals)})"
+        spoken, fx = session.slots.get("spoken_ccy"), session.slots.get("spoken_fx")
+        if spoken and spoken != ccy and fx and fx["ccy"] == spoken and fx["local"] == ccy:
+            return f"{base} (≈ {fmt_money(amount / fx['rate'], spoken, decimals)})"
         return base
 
     def _fx_note(self, session: Session) -> str:
@@ -345,6 +519,9 @@ class Orchestrator:
             "UNSUPPORTED_PRODUCT": ["Atender solicitud de tarjeta de credito"],
             "UNCLEAR": ["El asistente no logro entender la consulta"],
             "POLICY_DECLINED": ["El cliente puede pedir revision manual del rechazo"],
+            "APPLICATION_READY": ["Verificar los documentos que el cliente declaro tener y el ingreso; completar la revision final"],
+            "DOCS_INCOMPLETE": ["Ayudar al cliente a completar la documentacion pendiente: "
+                                + ", ".join((session.slots.get("application") or {}).get("missing", []))],
         }.get(reason, ["Revisar el caso segun el motivo indicado"])
         session.actions.append({"type": "handoff_created", "ticket_id": ticket, "verified": True, "at": now})
         session.handoff = {"ticket_id": ticket, "created_at": now, "reason": reason}
@@ -362,7 +539,7 @@ class Orchestrator:
     def _render(self, facts: dict, lang: str) -> ChatReply:
         draft = templates.render_facts(facts, lang)
         text, rewritten = draft, False
-        if facts["kind"] in self.rewrite_kinds and not facts.get("kind2"):
+        if facts["kind"] in self.rewrite_kinds and not facts.get("kind2") and not facts.get("extras"):
             try:
                 candidate = self.llm.compose(facts, lang, draft)
                 if candidate and safe_text(candidate, facts):
@@ -373,4 +550,5 @@ class Orchestrator:
         return ChatReply(reply=text, language=lang, intent=facts["intent"], outcome=facts.get("outcome"),
                          handoff_ticket=facts.get("handoff_ticket"), suggested_replies=sug,
                          awaiting=facts.get("awaiting"), llm_rewritten=rewritten,
-                         proactive_offer=facts.get("proactive_offer", False))
+                         proactive_offer=facts.get("proactive_offer", False),
+                         summary_ready=bool(facts.get("summary")), email=facts.get("email"))

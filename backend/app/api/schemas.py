@@ -58,6 +58,12 @@ class MessageRequest(BaseModel):
     language: Literal["es", "pt"] | None = Field(default=None, description="Opcional; si falta se detecta.")
 
 
+class EmailInfo(BaseModel):
+    to: str | None = Field(default=None, description="Correo registrado, enmascarado (j***@dominio).")
+    status: str = Field(description="`simulated_not_sent` en el prototipo: el correo se registra pero NO se envia.")
+    id: str
+
+
 class MessageResponse(BaseModel):
     reply: str
     language: Literal["es", "pt"]
@@ -67,6 +73,8 @@ class MessageResponse(BaseModel):
     suggested_replies: list[str] = []
     handoff_ticket: str | None = None
     proactive_offer: bool = Field(default=False, description="True si la respuesta incluye una oferta proactiva de credito.")
+    summary_ready: bool = Field(default=False, description="True si la respuesta incluye el resumen final de la propuesta (hay PDF descargable).")
+    email: EmailInfo | None = Field(default=None, description="Correo con el PDF del resumen (simulado en el prototipo).")
     trace_id: str
 
 

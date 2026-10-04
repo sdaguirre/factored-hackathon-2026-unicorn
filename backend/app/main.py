@@ -16,6 +16,7 @@ from app.agent.orchestrator import DEFAULT_REWRITE_KINDS, Orchestrator
 from app.agent.tools import HandoffQueue
 from app.api import chat, sessions
 from app.config import Settings, get_settings
+from app.core.outbox import Outbox
 from app.core.ratelimit import AuthLockout
 from app.core.sessions import SessionStore
 from app.data.repository import SnapshotRepository
@@ -43,11 +44,12 @@ def build_state(settings: Settings) -> AppState:
     repo = SnapshotRepository(settings.data_dir)
     policy = ce.load_policy(settings.policy_path)
     queue = HandoffQueue()
+    outbox = Outbox(settings.outbox_dir)
     return AppState(
-        settings=settings, repo=repo, policy=policy, jwt_secret=secret, queue=queue,
+        settings=settings, repo=repo, policy=policy, jwt_secret=secret, queue=queue, outbox=outbox,
         store=SessionStore(settings.session_ttl_minutes),
         lockout=AuthLockout(settings.auth_max_attempts, settings.auth_lockout_minutes, secret),
-        orchestrator=Orchestrator(repo, policy, make_llm(settings), queue, _rewrite_kinds(settings)),
+        orchestrator=Orchestrator(repo, policy, make_llm(settings), queue, _rewrite_kinds(settings), outbox),
     )
 
 

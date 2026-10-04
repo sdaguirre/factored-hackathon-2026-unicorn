@@ -54,6 +54,8 @@ def decide(session: Session, ctx: ToolContext) -> OfferDecision:
     last = slots.get("last_evaluation")
     if last and last["outcome"] in (ce.DECLINED, ce.NEEDS_REVIEW, ce.NEEDS_DATA):
         return _no(RECENT_DECLINE)
+    if last and last["outcome"] in (ce.ELIGIBLE, ce.ELIGIBLE_PROVISIONAL):
+        return _no("ALREADY_EVALUATED")      # ya tiene una propuesta: se le resume, no se le ofrece otra
 
     profile = get_profile(ctx)
     if not profile["accepts_marketing"]:

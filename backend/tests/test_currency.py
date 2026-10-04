@@ -68,6 +68,7 @@ def test_dollars_are_converted_to_the_customer_currency_before_evaluating(client
     assert s.slots["pending_request"]["conv"]["src"] == "USD" and s.slots["spoken_ccy"] == "USD"
     assert fmt_number(rate, 2) in r["reply"] and "USD" in r["reply"] and "MXN" in r["reply"]  # tasa, monto original y convertido
     assert "17/06/2026" in r["reply"]                                              # fecha de la tasa: no es cotizacion en vivo
+    assert "≈ 1.000 USD" in r["reply"]                                             # ida y vuelta coherente: 1.000 USD sigue siendo 1.000 USD
     assert r["outcome"] in ("eligible", "declined")
 
 
