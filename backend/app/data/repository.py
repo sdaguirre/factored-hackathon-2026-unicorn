@@ -24,6 +24,15 @@ class Customer:
     customer_status: str
 
 
+@dataclass(frozen=True)
+class FxQuote:
+    """Tasa de referencia: 1 unidad de `source` = `rate` unidades de `target`, a la fecha de corte `as_of`."""
+    source: str
+    target: str
+    rate: float
+    as_of: str
+
+
 class CustomerRepository(Protocol):
     def find_by_document(self, document_number: str) -> Customer | None: ...
     def credit_profile(self, customer_id: str) -> dict: ...
@@ -31,6 +40,9 @@ class CustomerRepository(Protocol):
     def recent_transactions(self, customer_id: str, limit: int = 40) -> list[dict]: ...
     def branch_cities(self) -> list[str]: ...
     def branch_city(self, branch_id: str) -> str | None: ...
+    def fx_rate(self, source: str, target: str) -> FxQuote | None: ...
+    def contact_email_masked(self, customer_id: str) -> str | None: ...
+    def documents_on_file(self, customer_id: str) -> set[str]: ...
 
 
 def _clean(v):
@@ -56,6 +68,12 @@ class SnapshotRepository:
         self._prod_by_c = {k: g for k, g in self._products.groupby("customer_id")}
         self._tx_by_c = {k: g.sort_values("transaction_date", ascending=False)
                          for k, g in self._tx.groupby("customer_id")}
+        # Tasas de cambio (opcional): sin el archivo, el agente avisa que no puede convertir monedas.
+        self._fx: dict[tuple[str, str], tuple[float, str]] = {}
+        fx_path = data_dir / "fx_rates.parquet"
+        if fx_path.exists():
+            for r in pd.read_parquet(fx_path).itertuples():
+                self._fx[(r.source_currency, r.target_currency)] = (float(r.exchange_rate), str(r.date)[:10])
 
     def find_by_document(self, document_number: str) -> Customer | None:
         cid = self._by_doc.get(str(document_number).strip())
@@ -93,6 +111,35 @@ class SnapshotRepository:
 
     def branch_city(self, branch_id: str) -> str | None:
         return self._branch_city.get(branch_id)
+
+    def fx_rate(self, source: str, target: str) -> FxQuote | None:
+        """Tasa directa del dataset o, si falta el par, triangulada por USD. None si no hay datos."""
+        if source == target:
+            return FxQuote(source, target, 1.0, "")
+        if (source, target) in self._fx:
+            rate, as_of = self._fx[(source, target)]
+            return FxQuote(source, target, rate, as_of)
+        a, b = self._fx.get((source, "USD")), self._fx.get(("USD", target))
+        if a and b:
+            return FxQuote(source, target, a[0] * b[0], min(a[1], b[1]))
+        return None
+
+    def contact_email_masked(self, customer_id: str) -> str | None:
+        """Correo registrado, enmascarado (j***@dominio). La direccion completa nunca sale de esta capa."""
+        if "email" not in self._cust.columns:
+            return None
+        email = _clean(self._cust.loc[customer_id].email)
+        if not email or "@" not in str(email):
+            return None
+        local, domain = str(email).split("@", 1)
+        return f"{local[:1]}***@{domain}"
+
+    def documents_on_file(self, customer_id: str) -> set[str]:
+        """Documentos del cliente que el banco ya tiene. Sin la columna, solo la identidad (verificada en el chat)."""
+        if "docs_on_file" not in self._cust.columns:
+            return {"id_copy"}
+        raw = _clean(self._cust.loc[customer_id].docs_on_file)
+        return {d for d in str(raw).split(",") if d} if raw else set()
 
     def sample_documents(self, n: int = 5) -> list[str]:
         """Solo para pruebas y README (datos sinteticos)."""

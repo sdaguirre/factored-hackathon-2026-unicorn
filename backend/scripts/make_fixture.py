@@ -9,6 +9,7 @@ Uso:  python scripts/make_fixture.py
 from __future__ import annotations
 
 import random
+import unicodedata
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -19,6 +20,7 @@ OUT = Path(__file__).resolve().parents[1] / "data" / "fixture"
 AS_OF = date(2026, 6, 17)
 SEED = 7
 rng = random.Random(SEED)
+extra = random.Random(SEED + 101)   # campos agregados despues: generador aparte para no alterar los datos previos
 nrng = np.random.default_rng(SEED)
 
 CITIES = {
@@ -100,6 +102,17 @@ def main() -> None:
             "max_days_past_due": dpd, "n_active_products": n_prod, "income_ccy": ccy,
         })
 
+        # Correo (dominio reservado example.com) y documentos que el banco ya tiene. El primer cliente tiene todos
+        # (camino directo a un asesor); el segundo, solo la identidad; el resto, al azar.
+        base = unicodedata.normalize("NFKD", customers[-1]["first_name"]).encode("ascii", "ignore").decode().lower()
+        on_file = ["id_copy"]
+        if i == 1:
+            on_file += ["address_proof", "income_proof"]
+        elif i > 2:
+            on_file += [d for d, pr in (("address_proof", 0.6), ("income_proof", 0.25)) if extra.random() < pr]
+        customers[-1]["email"] = f"{base}{i}@example.com"
+        customers[-1]["docs_on_file"] = ",".join(sorted(on_file))
+
         if with_tx:
             seen: set[tuple[str, date]] = set()
             scale = (income or 1_000) / 40
@@ -121,6 +134,15 @@ def main() -> None:
     pd.DataFrame(products).to_parquet(OUT / "products.parquet", index=False)
     pd.DataFrame(branches).to_parquet(OUT / "branches.parquet", index=False)
     pd.DataFrame(txs).to_parquet(OUT / "transactions.parquet", index=False)
+    # Tasas de referencia INVENTADAS por el equipo (la forma del dataset: una fila por par de monedas y fecha de corte).
+    usd = {"MXN": 17.30, "COP": 4000.0, "ARS": 350.0}
+    fx = []
+    for a in ["USD", "MXN", "COP", "ARS"]:
+        for b in ["USD", "MXN", "COP", "ARS"]:
+            if a != b:
+                rate = (usd.get(b, 1.0) / usd.get(a, 1.0))
+                fx.append({"date": AS_OF.isoformat(), "source_currency": a, "target_currency": b, "exchange_rate": rate})
+    pd.DataFrame(fx).to_parquet(OUT / "fx_rates.parquet", index=False)
     print(f"fixture: clientes={len(customers)} productos={len(products)} sucursales={len(branches)} movimientos={len(txs)} -> {OUT}")
 
 

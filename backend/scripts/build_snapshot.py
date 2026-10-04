@@ -11,6 +11,7 @@ datos suficientes para las preguntas de seguridad (productos activos y movimient
 from __future__ import annotations
 
 import argparse
+import hashlib
 from pathlib import Path
 
 import numpy as np
@@ -73,10 +74,18 @@ def main(n_customers: int) -> None:
 
     customers = (
         cu[cu.customer_id.isin(ids)][["customer_id", "document_type", "document_number", "first_name",
-                                      "country", "segment", "customer_status", "accepts_marketing"]]
+                                      "country", "segment", "customer_status", "accepts_marketing", "email"]]
         .merge(gold[["customer_id", "credit_score", "monthly_income", "existing_monthly_debt",
                      "max_days_past_due", "n_active_products", "income_ccy"]], on="customer_id")
     )
+    # Documentos que el banco "ya tiene": el dataset no los trae, asi que se INVENTAN de forma determinista por cliente
+    # (hash del id). La identidad siempre; comprobante de domicilio en ~60%; de ingresos en ~25%.
+    def docs(cid: str) -> str:
+        h = hashlib.sha256(cid.encode()).digest()
+        out = ["id_copy"] + (["address_proof"] if h[0] < 153 else []) + (["income_proof"] if h[1] < 64 else [])
+        return ",".join(sorted(out))
+
+    customers["docs_on_file"] = customers.customer_id.map(docs)
     products = active[active.customer_id.isin(ids)][
         ["product_id", "customer_id", "product_type", "product_number", "currency", "opening_date",
          "opening_branch_id", "opening_channel", "product_status"]
@@ -91,6 +100,10 @@ def main(n_customers: int) -> None:
           "currency", "merchant_name", "transaction_city", "transaction_country"]]
     )
 
+    # Tasas de referencia del dataset a su ultima fecha (una fila por par de monedas)
+    fx_all = pd.read_csv(RAW / "daily_exchange_rates.csv", encoding="utf-8-sig")
+    fx = fx_all[fx_all.date == fx_all.date.max()][["date", "source_currency", "target_currency", "exchange_rate"]]
+    fx.to_parquet(OUT / "fx_rates.parquet", index=False)
     customers.to_parquet(OUT / "customers.parquet", index=False)
     products.to_parquet(OUT / "products.parquet", index=False)
     branches.to_parquet(OUT / "branches.parquet", index=False)

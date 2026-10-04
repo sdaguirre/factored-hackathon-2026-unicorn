@@ -10,7 +10,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 
-from app.agent import proactive, templates
+from app.agent import money, proactive, templates
 from app.agent.handoff import build_summary
 from app.agent.language import norm, parse_amounts, parse_months
 from app.agent.llm import LLM, MockLLM
@@ -41,6 +41,14 @@ class ChatReply:
     awaiting: str | None = None
     llm_rewritten: bool = False
     proactive_offer: bool = False
+
+
+def _conv_dict(c: money.Conversion) -> dict:
+    from datetime import date as _date
+
+    y, m, d = (c.quote.as_of or "1970-01-01").split("-")
+    return {"amount_src": c.amount_src, "src": c.src, "amount_dst": c.amount_dst, "dst": c.dst, "rate": c.quote.rate,
+            "as_of": c.quote.as_of, "as_of_fmt": f"{d}/{m}/{y}", "rate_text": c.rate_text}
 
 
 def _digit_runs(text: str) -> set[str]:
@@ -109,6 +117,13 @@ class Orchestrator:
         awaiting = session.slots.pop("awaiting", None)
         amounts = parse_amounts(message)
         intent = nlu.intent
+        mention = money.detect_currency(message)
+        if mention.unsupported and amounts and (awaiting in ("amount", "income") or intent in (
+                "credit_eligibility", "update_income", "unknown")):
+            if awaiting:
+                session.slots["awaiting"] = awaiting  # sigue esperando el dato, ahora en una moneda soportada
+            return self._facts("currency_unsupported", intent, awaiting=awaiting, ccy=mention.unsupported,
+                               supported=", ".join(money.SUPPORTED))
 
         if awaiting == "confirm_handoff":
             if intent == "confirm_yes":
@@ -150,9 +165,9 @@ class Orchestrator:
         if intent == "credit_offers":
             return self._offers(session, ctx)
         if intent == "credit_eligibility":
-            return self._eligibility(session, ctx, nlu)
+            return self._eligibility(session, ctx, nlu, mention)
         if intent == "update_income":
-            return self._income(session, ctx, nlu)
+            return self._income(session, ctx, nlu, mention)
         # confirm_yes/no sin nada pendiente, o unknown
         if session.unknown_streak >= 2:
             return self._offer_handoff(session, "UNCLEAR", intent)
@@ -174,34 +189,44 @@ class Orchestrator:
         return facts
 
     # ------------------------------------------------------------------ casos
-    def _eligibility(self, session: Session, ctx: ToolContext, nlu: NLUResult) -> dict:
+    def _eligibility(self, session: Session, ctx: ToolContext, nlu: NLUResult, mention: money.CurrencyMention) -> dict:
         pending = session.slots.get("pending_request") or {}
         product = nlu.product or pending.get("product") or "personal_loan"
         if product not in SUPPORTED_PRODUCTS:
             return self._offer_handoff(session, "UNSUPPORTED_PRODUCT", "credit_eligibility", kind="unsupported_product")
         months = nlu.months or DEFAULT_MONTHS[product]
-        amount = nlu.amount or (pending.get("amount") if pending.get("product") == product and not nlu.product else None)
+        conv = pending.get("conv") if pending.get("product") == product else None
+        if nlu.amount is not None:
+            amount, conv, err = self._to_local(session, ctx, nlu.amount, mention)
+            if err:
+                return self._facts("fx_unavailable", "credit_eligibility", awaiting="amount", ccy=err)
+        else:
+            amount = pending.get("amount") if pending.get("product") == product and not nlu.product else None
         if amount is None:
             session.slots["awaiting"] = "amount"
             session.slots["pending_request"] = {"product": product, "amount": None, "months": months}
             return self._facts("ask_amount", "credit_eligibility", awaiting="amount",
                                product=templates.PRODUCT_NAME[session.language][product], months=str(months))
-        session.slots["pending_request"] = {"product": product, "amount": amount, "months": months}
+        session.slots["pending_request"] = {"product": product, "amount": amount, "months": months, "conv": conv}
         return self._evaluate(session, ctx, "credit_eligibility")
 
-    def _income(self, session: Session, ctx: ToolContext, nlu: NLUResult) -> dict:
+    def _income(self, session: Session, ctx: ToolContext, nlu: NLUResult, mention: money.CurrencyMention) -> dict:
         profile = get_profile(ctx)
         if nlu.declared_income is None:
             session.slots["awaiting"] = "income"
             return self._facts("ask_income", "update_income", awaiting="income", ccy=profile["income_ccy"])
-        inc = nlu.declared_income
+        inc, conv, err = self._to_local(session, ctx, nlu.declared_income, mention)
+        if err:
+            return self._facts("fx_unavailable", "update_income", awaiting="income", ccy=err)
         session.slots["declared_income"] = inc
+        session.slots["declared_income_conv"] = conv
         on_file = profile["monthly_income"]
         if on_file and inc > on_file * (1 + self.policy["declared_income"]["max_uplift_without_review"]):
             return self._offer_handoff(session, "INCOME_UPLIFT_REVIEW", "update_income", kind="income_review")
         if session.slots.get("pending_request", {}).get("amount"):
             return self._evaluate(session, ctx, "update_income")  # recalculo inmediato con el dato nuevo
-        return self._facts("income_saved", "update_income", income=fmt_money(inc, profile["income_ccy"], 0))
+        return self._facts("income_saved", "update_income", income=self._m(session, inc, profile["income_ccy"]),
+                           fx=self._fx_note(session))
 
     def _offers(self, session: Session, ctx: ToolContext) -> dict:
         info = offer_rates(ctx, session.slots.get("declared_income"))
@@ -213,7 +238,7 @@ class Orchestrator:
         d = probe.decision
         if d.max_amount:
             cap = templates.render("offers_capacity", session.language,
-                                   {"months": str(DEFAULT_MONTHS["personal_loan"]), "max_amount": fmt_money(d.max_amount, ccy, 0)})
+                                   {"months": str(DEFAULT_MONTHS["personal_loan"]), "max_amount": self._m(session, d.max_amount, ccy)})
         else:
             cap = templates.render("offers_no_capacity", session.language, {})
         session.slots.setdefault("verified_facts", []).append(
@@ -237,9 +262,10 @@ class Orchestrator:
             p = self.policy
             return self._facts(d.outcome, intent, outcome=d.outcome,
                                product=templates.PRODUCT_NAME[session.language][req["product"]],
-                               amount=fmt_money(req["amount"], res.ccy, 0), months=str(req["months"]),
-                               payment=fmt_money(d.payment, res.ccy, 2), rate=fmt_pct(d.rate_pct),
-                               dti=fmt_pct(d.dti_after * 100), max_dti=fmt_pct(p["max_dti"] * 100))
+                               amount=self._m(session, req["amount"], res.ccy), months=str(req["months"]),
+                               payment=self._m(session, d.payment, res.ccy, 2), rate=fmt_pct(d.rate_pct),
+                               dti=fmt_pct(d.dti_after * 100), max_dti=fmt_pct(p["max_dti"] * 100),
+                               fx=self._fx_note(session))
         return self._from_decision(session, intent, d, res.ccy, req)
 
     def _from_decision(self, session: Session, intent: str, d: ce.Decision, ccy: str, req: dict | None = None) -> dict:
@@ -251,14 +277,52 @@ class Orchestrator:
             return self._offer_handoff(session, "MISSING_DATA", intent, kind="needs_data_score", outcome=d.outcome)
         if d.outcome == ce.DECLINED and reason == "DTI_EXCEEDED" and req and (d.max_amount or 0) <= 0:
             return self._facts("declined_no_capacity", intent, outcome=d.outcome,
-                               dti=fmt_pct(d.dti_after * 100), max_dti=fmt_pct(self.policy["max_dti"] * 100))
+                               dti=fmt_pct(d.dti_after * 100), max_dti=fmt_pct(self.policy["max_dti"] * 100),
+                               fx=self._fx_note(session))
         if d.outcome == ce.DECLINED and reason == "DTI_EXCEEDED" and req:
             return self._facts("declined_dti", intent, outcome=d.outcome,
                                dti=fmt_pct(d.dti_after * 100), max_dti=fmt_pct(self.policy["max_dti"] * 100),
-                               months=str(req["months"]), max_amount=fmt_money(d.max_amount or 0, ccy, 0))
+                               months=str(req["months"]), max_amount=self._m(session, d.max_amount or 0, ccy),
+                               fx=self._fx_note(session))
         if d.outcome == ce.DECLINED:
             return self._offer_handoff(session, "POLICY_DECLINED", intent, kind="declined_generic", outcome=d.outcome)
         return self._offer_handoff(session, reason or "MISSING_DATA", intent, kind="needs_review", outcome=d.outcome)
+
+    # ------------------------------------------------------------------ monedas
+    def _to_local(self, session: Session, ctx: ToolContext, value: float, mention: money.CurrencyMention):
+        """(valor en la moneda local, conversion o None, error o None). La politica trabaja en la moneda del ingreso."""
+        local = get_profile(ctx)["income_ccy"]
+        spoken = money.resolve(mention, local)
+        if spoken is None:
+            return value, None, None                      # no dijo moneda: se asume la local y se conserva lo que haya
+        if spoken == local:
+            session.slots["spoken_ccy"] = None
+            return value, None, None
+        conv = money.convert(self.repo, value, spoken, local)
+        if conv is None:
+            return value, None, spoken                    # sin tasa disponible: se avisa, no se inventa
+        session.slots["spoken_ccy"] = spoken
+        return conv.amount_dst, _conv_dict(conv), None
+
+    def _m(self, session: Session, amount: float, ccy: str, decimals: int = 0) -> str:
+        """Monto en la moneda local y, si el cliente habla en otra, su equivalente aproximado."""
+        base = fmt_money(amount, ccy, decimals)
+        spoken = session.slots.get("spoken_ccy")
+        if spoken and spoken != ccy:
+            c = money.convert(self.repo, amount, ccy, spoken)
+            if c:
+                return f"{base} (≈ {fmt_money(c.amount_dst, spoken, decimals)})"
+        return base
+
+    def _fx_note(self, session: Session) -> str:
+        """Aviso de conversion (monto original, equivalente, tasa y fecha) mientras se use un monto convertido."""
+        notes = []
+        for conv in (session.slots.get("pending_request", {}).get("conv"), session.slots.get("declared_income_conv")):
+            if conv:
+                notes.append(templates.render("fx_note", session.language, {
+                    "src_amount": fmt_money(conv["amount_src"], conv["src"], 0), "dst_amount": fmt_money(conv["amount_dst"], conv["dst"], 0),
+                    "date": conv["as_of_fmt"], "rate": conv["rate_text"]}))
+        return " ".join(notes) + (" " if notes else "")
 
     # ------------------------------------------------------------------ derivacion
     def _offer_handoff(self, session: Session, reason: str, intent: str, kind: str = "needs_review",

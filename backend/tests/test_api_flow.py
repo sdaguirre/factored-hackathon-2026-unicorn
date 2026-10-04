@@ -108,8 +108,8 @@ def test_api_key_is_enforced_when_configured():
 
 
 def test_validation_errors_do_not_echo_input(client):
-    r = client.post("/v1/sessions", json={"document_number": "ab"})
-    assert r.status_code == 422 and "ab" not in r.text.replace("document_number", "")
+    r = client.post("/v1/sessions", json={"document_number": "q$q#zq"})   # caracteres invalidos; el trace_id es hex y no los contiene
+    assert r.status_code == 422 and "q$q#zq" not in r.text
 
 
 # ---------------------------------------------------------------- conversacion y politica

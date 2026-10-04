@@ -44,24 +44,24 @@ T: dict[str, dict[str, str]] = {
         "pt": "Não tenho sua renda mensal registrada. Se você informar sua renda mensal aproximada ({ccy}), calculo de forma provisória; o resultado ficará sujeito a verificação.",
     },
     "income_saved": {
-        "es": "Anotado: ingreso mensual declarado de {income}. Queda sujeto a verificación. ¿Qué monto desea consultar?",
-        "pt": "Anotado: renda mensal declarada de {income}. Fica sujeita a verificação. Qual valor deseja consultar?",
+        "es": "{fx}Anotado: ingreso mensual declarado de {income}. Queda sujeto a verificación. ¿Qué monto desea consultar?",
+        "pt": "{fx}Anotado: renda mensal declarada de {income}. Fica sujeita a verificação. Qual valor deseja consultar?",
     },
     "eligible": {
-        "es": "Con los datos del banco, su solicitud de {product} por {amount} a {months} meses es preliminarmente elegible. Cuota estimada: {payment} al mes, tasa anual de {rate}. Con esa cuota su endeudamiento sería de {dti} de su ingreso, bajo el máximo de {max_dti}. Es una simulación; la aprobación final requiere revisión del banco.",
-        "pt": "Com os dados do banco, sua solicitação de {product} de {amount} em {months} meses é preliminarmente elegível. Parcela estimada: {payment} por mês, taxa anual de {rate}. Com essa parcela seu endividamento seria de {dti} da sua renda, abaixo do máximo de {max_dti}. É uma simulação; a aprovação final requer análise do banco.",
+        "es": "{fx}Con los datos del banco, su solicitud de {product} por {amount} a {months} meses es preliminarmente elegible. Cuota estimada: {payment} al mes, tasa anual de {rate}. Con esa cuota su endeudamiento sería de {dti} de su ingreso, bajo el máximo de {max_dti}. Es una simulación; la aprobación final requiere revisión del banco.",
+        "pt": "{fx}Com os dados do banco, sua solicitação de {product} de {amount} em {months} meses é preliminarmente elegível. Parcela estimada: {payment} por mês, taxa anual de {rate}. Com essa parcela seu endividamento seria de {dti} da sua renda, abaixo do máximo de {max_dti}. É uma simulação; a aprovação final requer análise do banco.",
     },
     "eligible_provisional": {
-        "es": "Con el ingreso que usted declaró, su solicitud de {product} por {amount} a {months} meses es preliminarmente elegible, sujeta a verificación de ingresos. Cuota estimada: {payment} al mes, tasa anual de {rate}; su endeudamiento sería de {dti}, bajo el máximo de {max_dti}. Es una simulación.",
-        "pt": "Com a renda que você declarou, sua solicitação de {product} de {amount} em {months} meses é preliminarmente elegível, sujeita à verificação de renda. Parcela estimada: {payment} por mês, taxa anual de {rate}; seu endividamento seria de {dti}, abaixo do máximo de {max_dti}. É uma simulação.",
+        "es": "{fx}Con el ingreso que usted declaró, su solicitud de {product} por {amount} a {months} meses es preliminarmente elegible, sujeta a verificación de ingresos. Cuota estimada: {payment} al mes, tasa anual de {rate}; su endeudamiento sería de {dti}, bajo el máximo de {max_dti}. Es una simulación.",
+        "pt": "{fx}Com a renda que você declarou, sua solicitação de {product} de {amount} em {months} meses é preliminarmente elegível, sujeita à verificação de renda. Parcela estimada: {payment} por mês, taxa anual de {rate}; seu endividamento seria de {dti}, abaixo do máximo de {max_dti}. É uma simulação.",
     },
     "declined_dti": {
-        "es": "Con esa cuota su endeudamiento sería de {dti}, por encima del máximo de {max_dti}. Con su situación actual, el monto máximo estimado a {months} meses sería de {max_amount}. Si sus ingresos cambiaron, indíquemelo y recalculo.",
-        "pt": "Com essa parcela seu endividamento seria de {dti}, acima do máximo de {max_dti}. Na sua situação atual, o valor máximo estimado em {months} meses seria de {max_amount}. Se sua renda mudou, me informe e eu recalculo.",
+        "es": "{fx}Con esa cuota su endeudamiento sería de {dti}, por encima del máximo de {max_dti}. Con su situación actual, el monto máximo estimado a {months} meses sería de {max_amount}. Si sus ingresos cambiaron, indíquemelo y recalculo.",
+        "pt": "{fx}Com essa parcela seu endividamento seria de {dti}, acima do máximo de {max_dti}. Na sua situação atual, o valor máximo estimado em {months} meses seria de {max_amount}. Se sua renda mudou, me informe e eu recalculo.",
     },
     "declined_no_capacity": {
-        "es": "Con esa cuota su endeudamiento sería de {dti}, por encima del máximo de {max_dti}, y con sus compromisos actuales no tiene capacidad de endeudamiento disponible por ahora. Si sus ingresos cambiaron, indíquemelo y recalculo.",
-        "pt": "Com essa parcela seu endividamento seria de {dti}, acima do máximo de {max_dti}, e com seus compromissos atuais você não tem capacidade de endividamento disponível por enquanto. Se sua renda mudou, me informe e eu recalculo.",
+        "es": "{fx}Con esa cuota su endeudamiento sería de {dti}, por encima del máximo de {max_dti}, y con sus compromisos actuales no tiene capacidad de endeudamiento disponible por ahora. Si sus ingresos cambiaron, indíquemelo y recalculo.",
+        "pt": "{fx}Com essa parcela seu endividamento seria de {dti}, acima do máximo de {max_dti}, e com seus compromissos atuais você não tem capacidade de endividamento disponível por enquanto. Se sua renda mudou, me informe e eu recalculo.",
     },
     "declined_generic": {
         "es": "Por ahora no es posible ofrecerle este crédito según las políticas del banco. Puedo derivarlo con un asesor si desea revisar su caso. ¿Lo derivo?",
@@ -107,6 +107,18 @@ T: dict[str, dict[str, str]] = {
         "es": "Su caso ya fue derivado a un asesor con el número {ticket}.",
         "pt": "Seu caso já foi encaminhado a um consultor com o número {ticket}.",
     },
+    "fx_note": {
+        "es": "Convertí {src_amount} a {dst_amount} con la tasa de referencia del {date} ({rate}); no es una cotización en vivo.",
+        "pt": "Converti {src_amount} para {dst_amount} com a taxa de referência de {date} ({rate}); não é uma cotação em tempo real.",
+    },
+    "currency_unsupported": {
+        "es": "Todavía no puedo trabajar con {ccy}: manejo {supported}. ¿Me indica el monto en alguna de esas monedas?",
+        "pt": "Ainda não consigo trabalhar com {ccy}: trabalho com {supported}. Pode me informar o valor em uma dessas moedas?",
+    },
+    "fx_unavailable": {
+        "es": "En este momento no tengo una tasa de cambio disponible de {ccy} a su moneda. ¿Me indica el monto en su moneda local?",
+        "pt": "No momento não tenho uma taxa de câmbio disponível de {ccy} para a sua moeda. Pode me informar o valor na sua moeda local?",
+    },
     "closing": {
         "es": "Con gusto, que tenga un buen día.",
         "pt": "Por nada, tenha um bom dia.",
@@ -137,7 +149,7 @@ SUGGESTIONS = {
 
 
 def render(kind: str, lang: str, fmt: dict[str, str]) -> str:
-    return T[kind][lang].format(**fmt)
+    return T[kind][lang].format(**{"fx": "", **fmt})
 
 
 def render_facts(facts: dict, lang: str) -> str:
