@@ -86,7 +86,7 @@ SELECT
     detected_sentiment,
     CAST(sentiment_score AS DOUBLE) AS sentiment_score,
     customer_detected_accent,
-    agent_used_accent  -- STRING: confirmado NO es boolean, viene como texto (ej. 'colombian'),
+    agent_used_accent,  -- STRING: confirmado NO es boolean, viene como texto (ej. 'colombian')
     _bronze_ingested_at,
     current_timestamp() AS _silver_processed_at
 FROM workspace.bronze_latam_bank_test.call_center_interactions
