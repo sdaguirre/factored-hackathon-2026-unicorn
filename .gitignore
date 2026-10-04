@@ -1,0 +1,32 @@
+# ---------------------------------------------------------------- secretos (el repo es PUBLICO)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*credentials*
+*secret*
+
+# ---------------------------------------------------------------- datos del organizador y derivados (no se publican)
+.local/
+backend/data/snapshot/
+*.parquet
+!backend/data/fixture/*.parquet
+*.csv
+*.rar
+*.zip
+backend/DATOS_DE_PRUEBA.snapshot.md
+
+# ---------------------------------------------------------------- python / notebooks
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# ---------------------------------------------------------------- sistema y editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
