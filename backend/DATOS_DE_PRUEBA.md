@@ -8,6 +8,8 @@ Todo es **sintético**; no hay personas reales. Se genera con `python scripts/ge
 2. Responda las **preguntas de seguridad** con la ficha del cliente. Las preguntas cambian en cada intento y salen de estos mismos datos: ciudad o mes y año de apertura de un producto (se identifica por su terminación), y ciudad o monto de un movimiento (se identifica por su fecha y tipo). Las opciones incorrectas son inventadas.
 3. Pruebe las frases sugeridas de cada escenario. Para portugués, cambie el selector de idioma antes de empezar.
 
+**Flujos de crédito:** tras una evaluación favorable el asistente pregunta si quiere avanzar. Si dice que sí, pide solo los documentos que al cliente le **faltan** (los que el banco ya tiene figuran en cada ficha); el chat no recibe archivos: el cliente confirma que cuenta con ellos. Con todo en orden deriva a un asesor. Al terminar (despedida o botón «Terminar conversación») entrega el **resumen** de la propuesta y avisa que el detalle llegará por correo en un PDF: el correo es **simulado** (no se envía) y el PDF se descarga desde la interfaz. Si el cliente habla en otra moneda («dólares», «pesos colombianos»), el asistente la convierte a la de su ingreso con la tasa de referencia del conjunto de datos (fecha de corte, no cotización en vivo).
+
 Tres intentos fallidos bloquean ese documento 15 minutos (también un documento inexistente, a propósito). Para desbloquear, reinicie el backend: `docker compose restart chat-backend`.
 
 Los montos de los ejemplos están en la moneda del ingreso de cada cliente. Los resultados indicados (eligible, declined…) son los de la política provisional con los datos de hoy.
@@ -33,6 +35,7 @@ Los montos de los ejemplos están en la moneda del ingreso de cada cliente. Los 
   - 25/10/2025, compra: ciudad **Guadalajara**, monto **1.309,98 MXN**
   - 03/10/2025, retiro: ciudad **Guadalajara**, monto **1.807,95 MXN**
   - 07/09/2025, retiro: ciudad **Guadalajara**, monto **1.391,86 MXN**
+- Documentos que el banco ya tiene: comprobante de domicilio, copia del documento de identidad, comprobante de ingresos (al avanzar con una solicitud solo se piden los que faltan)
 
 Frases para probar:
 
@@ -41,6 +44,10 @@ Frases para probar:
 - «quiero un préstamo de 28500 a 24 meses» → eligible
 - «necesito un préstamo de 570000» → declined
 - «ahora gano 133000 al mes» (tras un rechazo por capacidad, recalcula como provisional)
+- «necesito un préstamo de 1000 dólares a 24 meses» → convierte a MXN con la tasa de referencia y muestra los equivalentes
+- «sí» (a «¿Le gustaría que avancemos?») → pide solo los documentos que falten; con todo en orden deriva a un asesor
+- «gracias, eso es todo» → resumen de la propuesta y aviso del PDF por correo (simulado)
+- «¿eres un robot?» → responde con la verdad: es el asistente virtual del banco, no una persona
 - «no reconozco un cargo en mi cuenta» → pide confirmar la derivación; nunca ofrece crédito
 - «quiero hablar con un asesor» → deriva y muestra el número de seguimiento
 
@@ -62,6 +69,7 @@ Frases para probar:
   - 05/01/2026, retiro: ciudad **Medellín**, monto **372.516,19 COP**
   - 10/09/2025, compra: ciudad **Medellín**, monto **152.978,06 COP**
   - 06/08/2025, compra: ciudad **Barranquilla**, monto **214.075,63 COP**
+- Documentos que el banco ya tiene: copia del documento de identidad (al avanzar con una solicitud solo se piden los que faltan)
 
 Frases para probar:
 
@@ -70,6 +78,10 @@ Frases para probar:
 - «quiero un préstamo de 3150000 a 24 meses» → eligible
 - «necesito un préstamo de 63000000» → declined
 - «ahora gano 14699999 al mes» (tras un rechazo por capacidad, recalcula como provisional)
+- «necesito un préstamo de 1000 dólares a 24 meses» → convierte a COP con la tasa de referencia y muestra los equivalentes
+- «sí» (a «¿Le gustaría que avancemos?») → pide solo los documentos que falten; con todo en orden deriva a un asesor
+- «gracias, eso es todo» → resumen de la propuesta y aviso del PDF por correo (simulado)
+- «¿eres un robot?» → responde con la verdad: es el asistente virtual del banco, no una persona
 - «no reconozco un cargo en mi cuenta» → pide confirmar la derivación; nunca ofrece crédito
 - «quiero hablar con un asesor» → deriva y muestra el número de seguimiento
 
@@ -93,6 +105,7 @@ Frases para probar:
   - 07/01/2026, compra: ciudad **Buenos Aires**, monto **26.153,77 ARS**
   - 20/09/2025, compra: ciudad **Buenos Aires**, monto **14.720,13 ARS**
   - 12/09/2025, compra: ciudad **Buenos Aires**, monto **14.767,59 ARS**
+- Documentos que el banco ya tiene: copia del documento de identidad, comprobante de ingresos (al avanzar con una solicitud solo se piden los que faltan)
 
 Frases para probar:
 
@@ -101,6 +114,10 @@ Frases para probar:
 - «quiero un préstamo de 175800 a 24 meses» → eligible
 - «necesito un préstamo de 3516000» → declined
 - «ahora gano 820400 al mes» (tras un rechazo por capacidad, recalcula como provisional)
+- «necesito un préstamo de 1000 dólares a 24 meses» → convierte a ARS con la tasa de referencia y muestra los equivalentes
+- «sí» (a «¿Le gustaría que avancemos?») → pide solo los documentos que falten; con todo en orden deriva a un asesor
+- «gracias, eso es todo» → resumen de la propuesta y aviso del PDF por correo (simulado)
+- «¿eres un robot?» → responde con la verdad: es el asistente virtual del banco, no una persona
 - «no reconozco un cargo en mi cuenta» → pide confirmar la derivación; nunca ofrece crédito
 - «quiero hablar con un asesor» → deriva y muestra el número de seguimiento
 
@@ -122,6 +139,7 @@ Frases para probar:
   - 21/11/2025, retiro: ciudad **Guadalajara**, monto **2.353,51 MXN**
   - 09/08/2025, compra: ciudad **Tijuana**, monto **1.787,81 MXN**
   - 30/07/2025, retiro: ciudad **Puebla**, monto **1.447,64 MXN**
+- Documentos que el banco ya tiene: comprobante de domicilio, copia del documento de identidad (al avanzar con una solicitud solo se piden los que faltan)
 
 Frases para probar:
 
@@ -130,6 +148,10 @@ Frases para probar:
 - «quiero un préstamo de 24000 a 24 meses» → eligible
 - «necesito un préstamo de 480000» → declined
 - «ahora gano 112000 al mes» (tras un rechazo por capacidad, recalcula como provisional)
+- «necesito un préstamo de 1000 dólares a 24 meses» → convierte a MXN con la tasa de referencia y muestra los equivalentes
+- «sí» (a «¿Le gustaría que avancemos?») → pide solo los documentos que falten; con todo en orden deriva a un asesor
+- «gracias, eso es todo» → resumen de la propuesta y aviso del PDF por correo (simulado)
+- «¿eres un robot?» → responde con la verdad: es el asistente virtual del banco, no una persona
 - «no reconozco un cargo en mi cuenta» → pide confirmar la derivación; nunca ofrece crédito
 - «quiero hablar con un asesor» → deriva y muestra el número de seguimiento
 
@@ -149,6 +171,7 @@ Frases para probar:
   - 14/10/2025, compra: ciudad **Cali**, monto **198.081,45 COP**
   - 06/09/2025, compra: ciudad **Cartagena**, monto **259.816,02 COP**
   - 01/08/2025, compra: ciudad **Cartagena**, monto **148.102,69 COP**
+- Documentos que el banco ya tiene: copia del documento de identidad, comprobante de ingresos (al avanzar con una solicitud solo se piden los que faltan)
 
 Frases para probar:
 
@@ -157,6 +180,10 @@ Frases para probar:
 - «quiero un préstamo de 1740000 a 24 meses» → eligible
 - «necesito un préstamo de 34800000» → declined
 - «ahora gano 8119999 al mes» (tras un rechazo por capacidad, recalcula como provisional)
+- «necesito un préstamo de 1000 dólares a 24 meses» → convierte a COP con la tasa de referencia y muestra los equivalentes
+- «sí» (a «¿Le gustaría que avancemos?») → pide solo los documentos que falten; con todo en orden deriva a un asesor
+- «gracias, eso es todo» → resumen de la propuesta y aviso del PDF por correo (simulado)
+- «¿eres un robot?» → responde con la verdad: es el asistente virtual del banco, no una persona
 - «no reconozco un cargo en mi cuenta» → pide confirmar la derivación; nunca ofrece crédito
 - «quiero hablar con un asesor» → deriva y muestra el número de seguimiento
 
@@ -182,10 +209,12 @@ Frases para probar:
   - 23/10/2025, compra: ciudad **Ciudad de México**, monto **11,99 MXN**
   - 24/09/2025, retiro: ciudad **Ciudad de México**, monto **41,87 MXN**
   - 25/07/2025, compra: ciudad **Ciudad de México**, monto **17,01 MXN**
+- Documentos que el banco ya tiene: comprobante de domicilio, copia del documento de identidad, comprobante de ingresos (al avanzar con una solicitud solo se piden los que faltan)
 
 Frases para probar:
 
 - «quiero un préstamo de 3000» → pide el ingreso; luego «gano 5000»
+- «¿eres un robot?» → responde con la verdad: es el asistente virtual del banco, no una persona
 - «no reconozco un cargo en mi cuenta» → pide confirmar la derivación; nunca ofrece crédito
 - «quiero hablar con un asesor» → deriva y muestra el número de seguimiento
 
@@ -210,12 +239,17 @@ Frases para probar:
   - 11/11/2025, compra: ciudad **Barranquilla**, monto **135.477,04 COP**
   - 06/10/2025, compra: ciudad **Barranquilla**, monto **67.860,40 COP**
   - 07/08/2025, retiro: ciudad **Barranquilla**, monto **114.120,62 COP**
+- Documentos que el banco ya tiene: copia del documento de identidad (al avanzar con una solicitud solo se piden los que faltan)
 
 Frases para probar:
 
 - «quiero un préstamo de 2700000 a 24 meses» → needs_data
 - «necesito un préstamo de 54000000» → needs_data
 - «ahora gano 12600000 al mes» (tras un rechazo por capacidad, recalcula como provisional)
+- «necesito un préstamo de 1000 dólares a 24 meses» → convierte a COP con la tasa de referencia y muestra los equivalentes
+- «sí» (a «¿Le gustaría que avancemos?») → pide solo los documentos que falten; con todo en orden deriva a un asesor
+- «gracias, eso es todo» → resumen de la propuesta y aviso del PDF por correo (simulado)
+- «¿eres un robot?» → responde con la verdad: es el asistente virtual del banco, no una persona
 - «no reconozco un cargo en mi cuenta» → pide confirmar la derivación; nunca ofrece crédito
 - «quiero hablar con un asesor» → deriva y muestra el número de seguimiento
 
@@ -239,12 +273,17 @@ Frases para probar:
   - 23/10/2025, compra: ciudad **Querétaro**, monto **2.589,51 MXN**
   - 19/09/2025, compra: ciudad **Querétaro**, monto **1.627,68 MXN**
   - 27/08/2025, compra: ciudad **Querétaro**, monto **2.162,29 MXN**
+- Documentos que el banco ya tiene: copia del documento de identidad (al avanzar con una solicitud solo se piden los que faltan)
 
 Frases para probar:
 
 - «quiero un préstamo de 21000 a 24 meses» → needs_review
 - «necesito un préstamo de 420000» → needs_review
 - «ahora gano 98000 al mes» (tras un rechazo por capacidad, recalcula como provisional)
+- «necesito un préstamo de 1000 dólares a 24 meses» → convierte a MXN con la tasa de referencia y muestra los equivalentes
+- «sí» (a «¿Le gustaría que avancemos?») → pide solo los documentos que falten; con todo en orden deriva a un asesor
+- «gracias, eso es todo» → resumen de la propuesta y aviso del PDF por correo (simulado)
+- «¿eres un robot?» → responde con la verdad: es el asistente virtual del banco, no una persona
 - «no reconozco un cargo en mi cuenta» → pide confirmar la derivación; nunca ofrece crédito
 - «quiero hablar con un asesor» → deriva y muestra el número de seguimiento
 
@@ -267,12 +306,17 @@ Frases para probar:
   - 04/10/2025, compra: ciudad **Ciudad de México**, monto **1.950,07 MXN**
   - 25/09/2025, retiro: ciudad **Ciudad de México**, monto **2.779,33 MXN**
   - 19/08/2025, retiro: ciudad **Guadalajara**, monto **2.908,78 MXN**
+- Documentos que el banco ya tiene: comprobante de domicilio, copia del documento de identidad, comprobante de ingresos (al avanzar con una solicitud solo se piden los que faltan)
 
 Frases para probar:
 
 - «quiero un préstamo de 30900 a 24 meses» → declined
 - «necesito un préstamo de 618000» → declined
 - «ahora gano 144200 al mes» (tras un rechazo por capacidad, recalcula como provisional)
+- «necesito un préstamo de 1000 dólares a 24 meses» → convierte a MXN con la tasa de referencia y muestra los equivalentes
+- «sí» (a «¿Le gustaría que avancemos?») → pide solo los documentos que falten; con todo en orden deriva a un asesor
+- «gracias, eso es todo» → resumen de la propuesta y aviso del PDF por correo (simulado)
+- «¿eres un robot?» → responde con la verdad: es el asistente virtual del banco, no una persona
 - «no reconozco un cargo en mi cuenta» → pide confirmar la derivación; nunca ofrece crédito
 - «quiero hablar con un asesor» → deriva y muestra el número de seguimiento
 
@@ -296,12 +340,17 @@ Frases para probar:
   - 09/10/2025, compra: ciudad **Puebla**, monto **189,10 MXN**
   - 06/09/2025, compra: ciudad **Puebla**, monto **520,89 MXN**
   - 24/07/2025, compra: ciudad **Puebla**, monto **501,00 MXN**
+- Documentos que el banco ya tiene: comprobante de domicilio, copia del documento de identidad, comprobante de ingresos (al avanzar con una solicitud solo se piden los que faltan)
 
 Frases para probar:
 
 - «quiero un préstamo de 7500 a 24 meses» → declined
 - «necesito un préstamo de 150000» → declined
 - «ahora gano 35000 al mes» (tras un rechazo por capacidad, recalcula como provisional)
+- «necesito un préstamo de 1000 dólares a 24 meses» → convierte a MXN con la tasa de referencia y muestra los equivalentes
+- «sí» (a «¿Le gustaría que avancemos?») → pide solo los documentos que falten; con todo en orden deriva a un asesor
+- «gracias, eso es todo» → resumen de la propuesta y aviso del PDF por correo (simulado)
+- «¿eres un robot?» → responde con la verdad: es el asistente virtual del banco, no una persona
 - «no reconozco un cargo en mi cuenta» → pide confirmar la derivación; nunca ofrece crédito
 - «quiero hablar con un asesor» → deriva y muestra el número de seguimiento
 
@@ -322,12 +371,17 @@ Frases para probar:
   - 20/10/2025, compra: ciudad **Tijuana**, monto **1.621,66 MXN**
   - 18/09/2025, compra: ciudad **Tijuana**, monto **539,56 MXN**
   - 03/08/2025, retiro: ciudad **Tijuana**, monto **1.886,21 MXN**
+- Documentos que el banco ya tiene: comprobante de domicilio, copia del documento de identidad (al avanzar con una solicitud solo se piden los que faltan)
 
 Frases para probar:
 
 - «quiero un préstamo de 13200 a 24 meses» → declined
 - «necesito un préstamo de 264000» → declined
 - «ahora gano 61599 al mes» (tras un rechazo por capacidad, recalcula como provisional)
+- «necesito un préstamo de 1000 dólares a 24 meses» → convierte a MXN con la tasa de referencia y muestra los equivalentes
+- «sí» (a «¿Le gustaría que avancemos?») → pide solo los documentos que falten; con todo en orden deriva a un asesor
+- «gracias, eso es todo» → resumen de la propuesta y aviso del PDF por correo (simulado)
+- «¿eres un robot?» → responde con la verdad: es el asistente virtual del banco, no una persona
 - «no reconozco un cargo en mi cuenta» → pide confirmar la derivación; nunca ofrece crédito
 - «quiero hablar con un asesor» → deriva y muestra el número de seguimiento
 

@@ -47,7 +47,7 @@ docker compose up --build        # interfaz en http://localhost:8080
 
 | Qué | Resultado | Límites |
 |---|---|---|
-| Pruebas automáticas del backend | 96 pruebas, sin red | No cubren la calidad conversacional del modelo real |
+| Pruebas automáticas del backend | 155 pruebas, sin red | No cubren la calidad conversacional del modelo real |
 | Intención del NLU, conjunto **reservado** (29 frases es/pt) | Reglas 79%. Claude 93–97% (dos corridas) | Una sola persona etiquetó; muestra pequeña |
 | Prueba en vivo con Claude Haiku 4.5 (13 turnos) | 0 caídas a reglas; ~1,1 s por llamada (p95 1,7 s); ~490 tokens de entrada y ~105 de salida por turno | Muestra pequeña, no es un benchmark |
 | Política de crédito sobre 150.000 clientes (solicitud tipo) | 44,2% elegible, 27,2% datos faltantes, 18,5% revisión humana, 10,1% rechazado | La política es inventada: no hay verdad de terreno externa |

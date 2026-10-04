@@ -38,6 +38,8 @@ POST /v1/sessions/{id}/verify          respuestas           -> authenticated | f
 POST /v1/sessions/{id}/messages        mensaje              -> respuesta, intención, resultado, ticket de derivación
 GET  /v1/sessions/{id}/handoff         resumen para el agente humano (de esa sesión)
 GET  /v1/handoffs                      cola de derivaciones (consola de agentes, clave aparte)
+POST /v1/sessions/{id}/end             cierre: resumen de la propuesta + aviso de correo (simulado)
+GET  /v1/sessions/{id}/summary.pdf     PDF del resumen (solo si hubo propuesta)
 DELETE /v1/sessions/{id}
 GET  /health  ·  GET /v1/meta
 ```
@@ -47,7 +49,7 @@ GET  /health  ·  GET /v1/meta
 - El cliente nunca ve las respuestas correctas: recibe ids de opción aleatorios por reto.
 - Los errores tienen siempre la forma `{"error": {"code", "message", "trace_id"}}`. Códigos: `INVALID_API_KEY`,
   `INVALID_TOKEN`, `SESSION_EXPIRED`, `AUTH_REQUIRED`, `AUTH_LOCKED`, `AUTH_UNAVAILABLE`, `MESSAGE_TOO_LONG`,
-  `VALIDATION_ERROR`, `NO_HANDOFF`, `INTERNAL_ERROR`.
+  `VALIDATION_ERROR`, `NO_HANDOFF`, `SESSION_ENDED`, `NO_SUMMARY`, `INTERNAL_ERROR`.
 - Cada respuesta lleva `X-Trace-Id` (se acepta uno entrante) para correlacionar con los logs JSON.
 - Un sitio web externo debe llamar a esta API **desde su servidor**: una `X-API-Key` en el navegador no es secreta.
   Para llamadas directas desde el navegador, configure `CHAT_CORS_ORIGINS` y trate la clave como identificador.
@@ -147,6 +149,23 @@ cliente); la oferta indica la capacidad máxima de la política (20% de endeudam
 propuesta comercial: conviene que el equipo decida un tope menor; y el sentimiento y el tema delicado los detecta
 un léxico simple en modo `mock`, no un modelo.
 
+## Moneda, solicitud, resumen y tono
+
+- **Moneda.** El código (`app/agent/money.py`) detecta la moneda que menciona el cliente (USD, MXN, COP, ARS; «pesos» sin
+  país se interpreta en la moneda del cliente). Convierte con la tabla de tipos de cambio del dataset (última fecha
+  disponible, triangulando por USD: **no es una cotización en vivo**) y evalúa la política siempre en la moneda del ingreso;
+  el mensaje muestra ambos montos con la misma tasa. BRL y EUR se informan como no soportadas en vez de inventar una tasa.
+- **Solicitud.** Tras una evaluación favorable el asistente pregunta si quiere avanzar. Si acepta, calcula los documentos
+  que exige la política (`required_documents` en `credit_policy.yaml`), resta los que el banco ya tiene (`docs_on_file`,
+  sintético) y pide uno por uno solo los que faltan. El chat **no recibe archivos**: el cliente confirma que los tiene y
+  el asesor los verifica. Con todo en orden se deriva a un asesor con el resumen; si falta algo, se le dice qué.
+- **Cierre.** Al despedirse o llamar a `POST /end`, el asistente resume la oferta y avisa que el detalle llegará por correo
+  en PDF. **El envío es simulado:** el PDF y un JSON `simulated_not_sent` quedan en `CHAT_OUTBOX_DIR` y solo se muestra el
+  correo enmascarado. El PDF se descarga con `GET /summary.pdf`. Un incidente (fraude, reclamo) nunca genera resumen comercial.
+- **Tono e identidad.** Las respuestas usan un tono cercano y varían su formulación. El asistente se presenta una vez como
+  «asistente virtual», nunca afirma ser una persona y, si el cliente pregunta si es un robot o una IA, responde con la
+  verdad (intención `ask_identity`). Un texto del modelo que diga ser humano se descarta.
+
 ## Configuración (variables de entorno, ver `.env.example`)
 
 | Variable | Defecto | Uso |
@@ -157,6 +176,7 @@ un léxico simple en modo `mock`, no un modelo.
 | `CHAT_CORS_ORIGINS` | vacío | Orígenes permitidos |
 | `CHAT_LLM_PROVIDER` | `mock` | `mock` o `anthropic` |
 | `CHAT_DATA_DIR` | `data/snapshot` si existe; si no, `data/fixture` | Carpeta con los parquet (montar como volumen en otros entornos) |
+| `CHAT_OUTBOX_DIR` | carpeta temporal del sistema | Bandeja de correos **simulados** (PDF + JSON) |
 | `CHAT_SESSION_TTL_MINUTES` · `CHAT_AUTH_MAX_ATTEMPTS` · `CHAT_AUTH_LOCKOUT_MINUTES` | 30 · 3 · 15 | Sesión y bloqueo |
 
 ## Datos
@@ -178,12 +198,17 @@ python backend/scripts/build_snapshot.py --customers 400    # desde la raíz; re
 pip install -r requirements-dev.txt && pytest
 ```
 
-96 pruebas: generación y verificación de preguntas, bloqueo, tokens, expiración, API key, formatos numéricos,
+155 pruebas: moneda y conversión, solicitud y documentos, resumen/PDF/correo simulado, tono e identidad, generación y verificación de preguntas, bloqueo, tokens, expiración, API key, formatos numéricos,
 intenciones es/pt, política, derivación, inyección de instrucciones, consola de agentes y oferta proactiva
 (consentimiento, preaprobación, momento adecuado, tema delicado, aceptación y rechazo) y salvaguardas contra un LLM
 que se equivoca (derivación no pedida, reescritura de decisiones, números ajenos, caída del modelo).
 
 ## Límites conocidos
+
+- **Correo simulado:** no hay envío real; el PDF se genera y se descarga, y el aviso lo dice con claridad.
+- **Sin carga de archivos:** el cliente confirma que tiene los documentos; la verificación es del asesor. `docs_on_file` es sintético.
+- **Tipos de cambio:** son los del dataset en su última fecha (no en vivo); solo USD, MXN, COP y ARS.
+- **Tokens:** el historial crece con la conversación, así que el costo por turno aumenta en sesiones largas.
 
 - **Seguridad de las preguntas:** con 3 preguntas de 4 opciones, adivinar acierta 1 de cada 64 veces por intento; la
   mitigación es el bloqueo, pero no sustituye un segundo factor real (OTP, biometría) en producción. Los datos de las

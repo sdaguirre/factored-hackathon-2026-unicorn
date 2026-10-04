@@ -83,6 +83,14 @@ SCENARIOS = [
 unavail = df[~df.ok_kba]
 
 
+def docs_line(cid) -> str:
+    names = {"id_copy": "copia del documento de identidad", "address_proof": "comprobante de domicilio",
+             "income_proof": "comprobante de ingresos"}
+    have = sorted(repo.documents_on_file(cid))
+    return ("- Documentos que el banco ya tiene: " + (", ".join(names.get(d, d) for d in have) or "ninguno")
+            + " (al avanzar con una solicitud solo se piden los que faltan)")
+
+
 def card(r) -> str:
     cid = r["cid"]
     lines = []
@@ -97,7 +105,7 @@ def card(r) -> str:
     uniq = [t for t, k in zip(txs, keys) if keys.count(k) == 1]
     tx_lines = [f"  - {fmt_date(pd.Timestamp(t['transaction_date']))}, {TX[t['transaction_type']]}: ciudad **{t['transaction_city']}**, "
                 f"monto **{fmt_money(float(t['amount']), t['currency'])}**" for t in uniq]
-    return "\n".join(["- Productos (ciudad y mes de apertura):"] + lines + ["- Movimientos de los últimos 12 meses:"] + (tx_lines or ["  - (ninguno)"]))
+    return "\n".join(["- Productos (ciudad y mes de apertura):"] + lines + ["- Movimientos de los últimos 12 meses:"] + (tx_lines or ["  - (ninguno)"]) + [docs_line(cid)])
 
 
 def phrases(r) -> list[str]:
@@ -112,9 +120,13 @@ def phrases(r) -> list[str]:
         out += [f"«quiero un préstamo de {small} a 24 meses» → {res_s.decision.outcome}",
                 f"«necesito un préstamo de {big}» → {res_b.decision.outcome}"]
         out.append(f"«ahora gano {int(inc * 1.4)} al mes» (tras un rechazo por capacidad, recalcula como provisional)")
+        out += [f"«necesito un préstamo de 1000 dólares a 24 meses» → convierte a {r['ccy']} con la tasa de referencia y muestra los equivalentes",
+                "«sí» (a «¿Le gustaría que avancemos?») → pide solo los documentos que falten; con todo en orden deriva a un asesor",
+                "«gracias, eso es todo» → resumen de la propuesta y aviso del PDF por correo (simulado)"]
     else:
         out += ["«quiero un préstamo de 3000» → pide el ingreso; luego «gano 5000»"]
-    out += ["«no reconozco un cargo en mi cuenta» → pide confirmar la derivación; nunca ofrece crédito",
+    out += ["«¿eres un robot?» → responde con la verdad: es el asistente virtual del banco, no una persona",
+            "«no reconozco un cargo en mi cuenta» → pide confirmar la derivación; nunca ofrece crédito",
             "«quiero hablar con un asesor» → deriva y muestra el número de seguimiento"]
     return out
 
@@ -138,6 +150,14 @@ md = ["# Datos de prueba del asistente",
       "de estos mismos datos: ciudad o mes y año de apertura de un producto (se identifica por su terminación), y ciudad o "
       "monto de un movimiento (se identifica por su fecha y tipo). Las opciones incorrectas son inventadas.",
       "3. Pruebe las frases sugeridas de cada escenario. Para portugués, cambie el selector de idioma antes de empezar.",
+      "",
+      "**Flujos de crédito:** tras una evaluación favorable el asistente pregunta si quiere avanzar. Si dice que sí, pide solo los "
+      "documentos que al cliente le **faltan** (los que el banco ya tiene figuran en cada ficha); el chat no recibe archivos: el "
+      "cliente confirma que cuenta con ellos. Con todo en orden deriva a un asesor. Al terminar (despedida o botón «Terminar "
+      "conversación») entrega el **resumen** de la propuesta y avisa que el detalle llegará por correo en un PDF: el correo es "
+      "**simulado** (no se envía) y el PDF se descarga desde la interfaz. Si el cliente habla en otra moneda («dólares», «pesos "
+      "colombianos»), el asistente la convierte a la de su ingreso con la tasa de referencia del conjunto de datos (fecha de corte, "
+      "no cotización en vivo).",
       "",
       "Tres intentos fallidos bloquean ese documento 15 minutos (también un documento inexistente, a propósito). "
       "Para desbloquear, reinicie el backend: `docker compose restart chat-backend`.",

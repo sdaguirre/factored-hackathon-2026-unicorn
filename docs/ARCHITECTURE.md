@@ -29,6 +29,14 @@ Cliente ─► Interfaz (nginx) ─► /v1 ─► API FastAPI ─► Orquestador
 El nginx de la interfaz sirve la página y reenvía `/v1` al backend agregando la clave de integración en el servidor; el
 puerto del backend no se publica y `/v1/handoffs` (cola de la consola del agente) se bloquea en el proxy.
 
+## Conversación de crédito: moneda, solicitud y cierre
+
+El orquestador sigue siendo una máquina de estados (`awaiting`: `offer_interest`, `amount`, `income`, `proceed`, `docs_all`,
+`doc_item`). La moneda se detecta y convierte en código (`money.py`); los documentos pendientes salen de la política y de
+`docs_on_file` (`documents.py`); el cierre (`/end`) arma el resumen y deja el PDF en una bandeja simulada (`core/outbox.py`,
+`core/pdf.py`). El LLM solo clasifica y redacta mensajes de bajo riesgo; la identidad (¿eres un robot?) se responde con
+plantilla y cualquier texto que afirme ser humano se descarta.
+
 ## Autenticación
 
 Tres preguntas de seguridad de opción única generadas desde los datos del cliente (ciudad o mes y año de apertura de un
