@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Gold layer for the pre-approved credit assistant (policy_version 0.2).
+-- Gold layer for the pre-approved credit assistant (policy_version 0.3).
 --
 --   fn_monthly_installment / fn_max_principal  annuity math shared by every table below
 --   customer_credit_profile                     one row per customer: indicators + eligibility
@@ -13,7 +13,8 @@
 --
 -- Policy (docs/CREDIT_RULES.md): all monthly installments, current + new, cannot exceed
 -- max_debt_to_income (20%) of monthly income. Risk band (credit_score) and segment move the
--- reference rate of ref_term_grid, clamped to the product rate range.
+-- reference rate of ref_term_grid, clamped to the product rate range. Loans can take any amount in
+-- the product range at terms up to the band maximum (risk limits the term, not the amount).
 -- Every parameter is synthetic. Results are offline, not production decisions.
 -- =============================================================================================
 
@@ -195,7 +196,8 @@ complaints AS (
     GROUP BY customer_id
 ),
 banded AS (
-    SELECT c.customer_id, b.band, b.offer_allowed, b.rate_adjustment_pp AS band_rate_adjustment_pp
+    SELECT c.customer_id, b.band, b.offer_allowed, b.rate_adjustment_pp AS band_rate_adjustment_pp,
+           b.max_term_personal_loan_months, b.max_term_mortgage_months
     FROM customers c
     JOIN workspace.silver_latam_bank.ref_policy_bands b ON c.credit_score >= b.min_credit_score
     QUALIFY row_number() OVER (PARTITION BY c.customer_id ORDER BY b.min_credit_score DESC) = 1
@@ -232,6 +234,8 @@ base AS (
         bd.band                                                      AS risk_band,
         coalesce(bd.offer_allowed, false)                            AS band_offer_allowed,
         coalesce(bd.band_rate_adjustment_pp, 0)                      AS band_rate_adjustment_pp,
+        coalesce(bd.max_term_personal_loan_months, 0)                AS max_term_personal_loan_months,
+        coalesce(bd.max_term_mortgage_months, 0)                     AS max_term_mortgage_months,
         coalesce(sa.rate_adjustment_pp, 0)                           AS segment_rate_adjustment_pp
     FROM customers c
     CROSS JOIN params p
@@ -294,6 +298,8 @@ SELECT
     -- pricing
     band_rate_adjustment_pp,
     segment_rate_adjustment_pp,
+    max_term_personal_loan_months,
+    max_term_mortgage_months,
     band_rate_adjustment_pp + segment_rate_adjustment_pp                   AS total_rate_adjustment_pp,
     -- hard filters (docs/CREDIT_RULES.md section 1)
     filter(array(
@@ -339,10 +345,11 @@ FROM capacity;
 -- customer_credit_offer_options
 -- ---------------------------------------------------------------------------------------------
 CREATE OR REPLACE TABLE workspace.gold_latam_bank.customer_credit_offer_options
-COMMENT 'Baseline pre-approved offer per customer and product option (ref_term_grid row: loan term or card tier). Rate = reference rate + band and segment adjustments, clamped to the product range. Maximum amount = what the available 20% installment capacity can repay, capped by the row amount range. Indicative only; the rules service recomputes when the customer gives new data. Amounts in USD and local currency.'
+COMMENT 'Baseline pre-approved offer per customer and product option (ref_term_grid row: loan term or card tier). Options are alternatives: each uses the whole 20% capacity. Rate = reference rate + band and segment adjustments, clamped to the product range. Loans: any amount in the product range, at terms up to the band maximum. Cards: the tier credit limit range. Maximum amount = what the available installment can repay, capped by the range. Indicative only; the rules service recomputes when the customer gives new data. Amounts in USD and local currency.'
 AS
 WITH catalog AS (
-    SELECT product_code, min_rate_pct, max_rate_pct FROM workspace.silver_latam_bank.ref_product_catalog
+    SELECT product_code, min_amount_usd, max_amount_usd, min_rate_pct, max_rate_pct
+    FROM workspace.silver_latam_bank.ref_product_catalog
 ),
 priced AS (
     SELECT
@@ -359,12 +366,17 @@ priced AS (
         p.as_of_date,
         p.policy_version,
         g.product_code                                    AS option_code,
-        split(g.product_code, '-')[0]                     AS product_code,
+        c.product_code,
         g.product_type,
         g.tier,
         g.term_months,
-        g.min_amount_usd                                  AS option_min_amount_usd,
-        g.max_amount_usd                                  AS option_max_amount_usd,
+        -- loans: whole product range at any allowed term; cards: the tier limit range
+        CASE WHEN c.product_code = 'CC' THEN g.min_amount_usd ELSE c.min_amount_usd END AS option_min_amount_usd,
+        CASE WHEN c.product_code = 'CC' THEN g.max_amount_usd ELSE c.max_amount_usd END AS option_max_amount_usd,
+        CASE c.product_code
+            WHEN 'PL' THEN g.term_months <= p.max_term_personal_loan_months
+            WHEN 'MG' THEN g.term_months <= p.max_term_mortgage_months
+            ELSE true END                                 AS term_allowed,
         g.reference_rate_pct,
         least(greatest(g.reference_rate_pct + p.total_rate_adjustment_pp, c.min_rate_pct), c.max_rate_pct) AS offer_rate_pct
     FROM workspace.gold_latam_bank.customer_credit_profile p
@@ -378,8 +390,13 @@ sized AS (
     FROM priced
 ),
 capped AS (
-    SELECT *, floor(least(max_amount_by_capacity_usd, option_max_amount_usd) / 100) * 100 AS offer_max_amount_usd
+    SELECT *, floor(least(max_amount_by_capacity_usd, option_max_amount_usd) / 100) * 100 AS capped_amount_usd
     FROM sized
+),
+available AS (
+    SELECT *,
+        coalesce(is_eligible AND term_allowed AND capped_amount_usd >= option_min_amount_usd, false) AS is_available
+    FROM capped
 )
 SELECT
     customer_id,
@@ -393,26 +410,27 @@ SELECT
     round(offer_rate_pct, 2)                                                   AS offer_rate_pct,
     option_min_amount_usd,
     option_max_amount_usd,
+    term_allowed,
     round(max_amount_by_capacity_usd, 2)                                       AS max_amount_by_capacity_usd,
-    (is_eligible AND offer_max_amount_usd >= option_min_amount_usd)            AS is_available,
+    is_available,
     offer_mode,
-    CASE WHEN NOT is_eligible                                THEN 'customer_not_eligible'
-         WHEN offer_max_amount_usd < option_min_amount_usd   THEN 'capacity_below_option_minimum' END AS unavailable_reason,
-    CASE WHEN is_eligible AND offer_max_amount_usd >= option_min_amount_usd THEN offer_max_amount_usd END AS offer_max_amount_usd,
-    CASE WHEN is_eligible AND offer_max_amount_usd >= option_min_amount_usd
-         THEN round(workspace.gold_latam_bank.fn_monthly_installment(offer_max_amount_usd, offer_rate_pct, term_months), 2) END AS offer_monthly_installment_usd,
+    CASE WHEN NOT is_eligible                              THEN 'customer_not_eligible'
+         WHEN NOT term_allowed                             THEN 'term_above_band_maximum'
+         WHEN capped_amount_usd < option_min_amount_usd    THEN 'capacity_below_option_minimum' END AS unavailable_reason,
+    CASE WHEN is_available THEN capped_amount_usd END                          AS offer_max_amount_usd,
+    CASE WHEN is_available
+         THEN round(workspace.gold_latam_bank.fn_monthly_installment(capped_amount_usd, offer_rate_pct, term_months), 2) END AS offer_monthly_installment_usd,
     local_currency,
     fx_to_usd,
-    CASE WHEN is_eligible AND offer_max_amount_usd >= option_min_amount_usd
-         THEN round(offer_max_amount_usd / fx_to_usd, 0) END                   AS offer_max_amount_local,
-    CASE WHEN is_eligible AND offer_max_amount_usd >= option_min_amount_usd
-         THEN round(workspace.gold_latam_bank.fn_monthly_installment(offer_max_amount_usd, offer_rate_pct, term_months) / fx_to_usd, 0) END AS offer_monthly_installment_local,
+    CASE WHEN is_available THEN round(capped_amount_usd / fx_to_usd, 0) END   AS offer_max_amount_local,
+    CASE WHEN is_available
+         THEN round(workspace.gold_latam_bank.fn_monthly_installment(capped_amount_usd, offer_rate_pct, term_months) / fx_to_usd, 0) END AS offer_monthly_installment_local,
     risk_band,
     segment,
     as_of_date,
     policy_version,
     current_timestamp()                                                        AS computed_at
-FROM capped;
+FROM available;
 
 -- ---------------------------------------------------------------------------------------------
 -- credit_offers: offers the customer accepted in the chat, before the advisor handoff.
@@ -456,7 +474,7 @@ CREATE TABLE IF NOT EXISTS workspace.gold_latam_bank.credit_offers (
     open_critical_complaints   INT           NOT NULL COMMENT 'Open Critical complaints at offer time; > 0 means the offer was not proactive',
     -- controls and handoff
     is_conditional             BOOLEAN       NOT NULL COMMENT 'True when the offer relies on data declared in the chat',
-    flags                      ARRAY<STRING>          COMMENT 'Advisor flags, e.g. F02_NEAR_THRESHOLD, F03_DECLARED_DATA',
+    flags                      ARRAY<STRING>          COMMENT 'Advisor flags: F02_NEAR_LIMIT_DECLARED_INCOME, F03_DECLARED_DATA, F04_OPEN_COMPLAINTS',
     required_documents         ARRAY<STRING>          COMMENT 'Documents the advisor must request',
     status                     STRING        NOT NULL COMMENT 'accepted, handed_off, expired or cancelled',
     handoff_ticket_id          STRING                 COMMENT 'Advisor queue ticket once handed off',
@@ -487,3 +505,7 @@ ALTER TABLE workspace.gold_latam_bank.credit_offers ADD CONSTRAINT positive_amou
 ALTER TABLE workspace.gold_latam_bank.credit_offers DROP CONSTRAINT IF EXISTS within_debt_limit;
 ALTER TABLE workspace.gold_latam_bank.credit_offers ADD CONSTRAINT within_debt_limit
     CHECK (debt_to_income_after <= 0.20 + 1e-9);
+
+-- Keep column comments current on an existing table (CREATE TABLE IF NOT EXISTS does not update them).
+ALTER TABLE workspace.gold_latam_bank.credit_offers ALTER COLUMN flags
+    COMMENT 'Advisor flags: F02_NEAR_LIMIT_DECLARED_INCOME, F03_DECLARED_DATA, F04_OPEN_COMPLAINTS';

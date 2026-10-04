@@ -63,7 +63,7 @@ python backend/scripts/build_snapshot.py --customers 400                        
 
 The credit flow is also built in Databricks (Unity Catalog, `workspace` catalog). Run order,
 objects and results are in `data/databricks/README.md`; policy and formulas in
-`docs/CREDIT_RULES.md` (policy 0.2, the team's source of truth for credit rules).
+`docs/CREDIT_RULES.md` (policy 0.3, the reference version of the credit rules).
 
 | Layer | Objects | Notes |
 |---|---|---|
@@ -73,7 +73,7 @@ objects and results are in `data/databricks/README.md`; policy and formulas in
 
 Findings from building these layers that complement the table above:
 - Observed deposits are sparse (median under 2 per year per customer) and a median 20% of
-  declared income, so policy 0.2 uses declared income for the 20% limit.
+  declared income, so the credit rules use declared income for the 20% limit.
 - `amount_usd` is null for every USD transaction; use `coalesce(amount_usd, amount)` for USD.
 - Loans have no `expiration_date`; existing loan installments use the synthetic term grid.
 - In silver, numeric columns are strings and `credit_score` comes as `'805.0'`, so

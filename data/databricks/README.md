@@ -15,7 +15,7 @@ values are synthetic and results are offline.
 | Object | Grain | Purpose |
 |---|---|---|
 | `customer_credit_profile` | one row per customer | Income used, current installments, 20% capacity, risk band, rate adjustment, reason codes R01–R08, `is_eligible`, `offer_mode`, advisor-review flag, FX used |
-| `customer_credit_offer_options` | customer × `ref_term_grid` option | Offer rate, maximum amount, installment and availability, in USD and local currency |
+| `customer_credit_offer_options` | customer × `ref_term_grid` option | Alternatives, each using the whole 20% capacity: offer rate, maximum amount, installment and availability, in USD and local currency. Loans at any amount in the product range up to the band maximum term |
 | `credit_offers` | one row per accepted offer | Written by the API only. Change Data Feed on; CHECK constraints on status, origin, positive amounts and the 20% limit |
 | `fn_monthly_installment`, `fn_max_principal` | — | Annuity formulas the rules service must reproduce exactly |
 
@@ -39,8 +39,10 @@ python data/scripts/run_databricks_sql.py data/databricks/gold_credit_tables.sql
 `gold_credit_tables.sql` recreates the profile and options tables but keeps `credit_offers`
 (`CREATE TABLE IF NOT EXISTS`), so accepted offers are never lost on a rebuild.
 
-## Results as of the 2026-06-30 cutoff (policy 0.2)
+## Results as of the 2026-06-30 cutoff (policy 0.3)
 - 150,000 customers; 50,707 eligible; 24,953 `proactive`, 25,754 `on_customer_interest`.
 - Main reasons for no offer: missing income 30,033 (recoverable by asking the customer),
   blocked or suspended product 25,519, missing score 22,492, inactive customer 22,300.
+- Band term limits: eligible customers without any personal loan option dropped from 10,772
+  (policy 0.2 grid) to 5,319; no option exceeds the band maximum term or the 20% capacity.
 - SQL and Python annuity results match (40,000 USD at 6.2% over 180 months: 341.88 per month).
