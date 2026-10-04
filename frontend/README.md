@@ -27,14 +27,18 @@ Sin Docker, para desarrollo: sirva esta carpeta con cualquier servidor estático
 2. **Preguntas de seguridad**: tres preguntas de opción única; "Verificar" se activa al responder todas. Si fallan,
    muestra los intentos restantes y las preguntas nuevas; al bloquearse vuelve al inicio con el aviso.
 3. **Chat**: mensajes con indicador de escritura, botones de respuestas sugeridas, globo verde "Oferta indicativa"
-   cuando la API marca `proactive_offer`, tarjeta con el número de seguimiento cuando hay derivación.
-4. **Fin**: al terminar la conversación (cierra la sesión en el servidor) o si la sesión expira.
+   cuando la API marca `proactive_offer`, tarjeta con el número de seguimiento cuando hay derivación y tarjeta de
+   **resumen listo** con el botón para descargar el PDF cuando la API marca `summary_ready`.
+4. **Fin**: "Terminar conversación" pide el cierre al servidor (`POST /v1/sessions/{id}/end`): si hay una propuesta evaluada,
+   muestra su **resumen** y el aviso de que el detalle se enviaría por correo en un PDF, y deja **descargar el PDF**.
+   También termina si la sesión expira. "Nueva conversación" cierra la sesión en el servidor.
 
 Idioma: se toma del navegador (es o pt) y se cambia con el selector; el idioma elegido viaja en cada mensaje.
 
 ## Seguridad
 
-- Todo texto que llega de la API se inserta con `textContent`, nunca como HTML. Probado enviando
+- Todo texto que llega de la API se inserta con `textContent`, nunca como HTML. El PDF se descarga con `fetch` y el token de sesión
+  (no hay un enlace público al archivo). Probado enviando
   `<img onerror=…>` y `<script>`: se muestra como texto y no se ejecuta nada.
 - El token de sesión vive solo en memoria de la página (no en `localStorage`): recargar la página cierra la sesión.
 - nginx añade `Content-Security-Policy` estricta (sin scripts ni estilos en línea; solo mismo origen),

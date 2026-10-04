@@ -35,6 +35,7 @@
       "login-help": "loginHelp", "doc-label": "docLabel", "login-btn": "start", "challenge-title": "challengeTitle",
       "challenge-back": "back", "verify-btn": "verify", "send-btn": "send", "end-btn": "end",
       "ended-title": "endedTitle", "ended-text": "endedText", "restart-btn": "newChat", "disclaimer": "disclaimer",
+      "pdf-btn": "downloadPdf",
       "input-label": "placeholder",
     };
     Object.keys(text).forEach(function (id) { $(id).textContent = t(text[id]); });
@@ -221,6 +222,55 @@
     return item;
   }
 
+  function emailLine(email) {
+    return email && email.to ? t("summaryReady", { to: email.to }) : t("summaryReadyNoAddr");
+  }
+
+  function addSummaryCard(email) {
+    var box = $("messages");
+    var card = document.createElement("div");
+    card.className = "handoff summary-card";
+    card.setAttribute("role", "status");
+    var s = document.createElement("span");
+    s.textContent = emailLine(email) + " ";
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "btn btn-quiet btn-small";
+    b.textContent = t("downloadPdf");
+    b.addEventListener("click", downloadSummary);
+    card.appendChild(s);
+    card.appendChild(b);
+    box.appendChild(card);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function downloadSummary() {
+    if (!state.sid) return;
+    var headers = {};
+    if (cfg.apiKey) headers["X-API-Key"] = cfg.apiKey;
+    if (state.token) headers.Authorization = "Bearer " + state.token;
+    fetch(cfg.apiBase + "/v1/sessions/" + encodeURIComponent(state.sid) + "/summary.pdf", { headers: headers })
+      .then(function (res) {
+        if (!res.ok) {
+          return res.json().catch(function () { return null; }).then(function (data) {
+            throw (data && data.error) || { code: "generic" };
+          });
+        }
+        return res.blob();
+      })
+      .then(function (blob) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = "resumen-propuesta.pdf";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+      })
+      .catch(function (err) { showBanner(errorText(err && err.code ? err : { code: "network" })); });
+  }
+
   function addHandoff(ticket) {
     if (!ticket || state.handoffShown[ticket]) return;
     state.handoffShown[ticket] = true;
@@ -308,6 +358,7 @@
         var d = r.data;
         addMessage("assistant", d.reply, { offer: d.proactive_offer });
         addHandoff(d.handoff_ticket);
+        if (d.summary_ready) { state.hasSummary = true; addSummaryCard(d.email); }
         showSuggestions(d.suggested_replies || []);
         $("input").focus();
       });
@@ -319,6 +370,8 @@
     state.token = null;
     state.questions = [];
     state.handoffShown = {};
+    state.hasSummary = false;
+    $("ended-reply").hidden = true; $("ended-email").hidden = true; $("pdf-btn").hidden = true;
     showTyping(false);
     showSuggestions([]);
     $("input").disabled = false;
@@ -327,12 +380,29 @@
 
   function onEnd() {
     var sid = state.sid;
-    if (sid) api("DELETE", "/v1/sessions/" + encodeURIComponent(sid), null, true);
     showBanner("");
-    resetSession(false);
+    if (!sid || state.busy) return resetSession(false);
+    setBusy(true);
+    api("POST", "/v1/sessions/" + encodeURIComponent(sid) + "/end", null, true).then(function (r) {
+      setBusy(false);
+      if (!r.ok) { showBanner(errorText(r.error)); return resetSession(false); }
+      var d = r.data;
+      state.hasSummary = state.hasSummary || d.summary_ready;
+      $("ended-reply").textContent = d.reply;
+      $("ended-reply").hidden = !d.reply;
+      $("ended-email").textContent = d.summary_ready ? emailLine(d.email) : "";
+      $("ended-email").hidden = !d.summary_ready;
+      $("pdf-btn").hidden = !state.hasSummary;
+      showTyping(false);
+      showSuggestions([]);
+      setView("ended");           // se conserva la sesion para poder descargar el PDF hasta "Nueva conversacion"
+    });
   }
 
   function onRestart() {
+    if (state.sid) api("DELETE", "/v1/sessions/" + encodeURIComponent(state.sid), null, true);
+    state.sid = null; state.token = null; state.hasSummary = false; state.handoffShown = {};
+    $("ended-reply").hidden = true; $("ended-email").hidden = true; $("pdf-btn").hidden = true;
     showBanner("");
     $("messages").textContent = "";
     $("doc").value = "";
@@ -354,6 +424,7 @@
     $("composer").addEventListener("submit", function (ev) { ev.preventDefault(); send($("input").value); });
     $("end-btn").addEventListener("click", onEnd);
     $("restart-btn").addEventListener("click", onRestart);
+    $("pdf-btn").addEventListener("click", downloadSummary);
     setView("login");
   }
 

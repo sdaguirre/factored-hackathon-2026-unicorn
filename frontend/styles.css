@@ -105,6 +105,9 @@ form input[type="text"] { width: 100%; }
 form .btn-primary { margin-top: 16px; }
 .row { display: flex; gap: 10px; justify-content: space-between; margin-top: 16px; }
 .row .btn-primary { margin-top: 0; }
+.row-start { justify-content: flex-start; flex-wrap: wrap; }
+.ended-reply { white-space: pre-wrap; background: var(--accent-soft); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin: 0 0 12px; }
+.btn-small { padding: 4px 10px; font-size: 0.9rem; margin-left: 6px; }
 
 .banner {
   margin: 0; padding: 10px 14px; border-radius: 10px;
@@ -137,7 +140,7 @@ form .btn-primary { margin-top: 16px; }
 /* ---------------------------------------------------------------- chat */
 .chat { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
 .messages {
-  flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
+  flex: 1; min-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
   padding: 6px 2px;
 }
 .msg {
@@ -181,9 +184,19 @@ form .btn-primary { margin-top: 16px; }
 .footer { text-align: center; padding: 6px 0 14px; color: var(--muted); }
 
 @media (max-width: 520px) {
+  /* En pantallas angostas las sugerencias van en una sola fila desplazable: apiladas se comian la altura del chat */
+  .suggestions { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
+  .chip { flex: none; white-space: nowrap; }
   .app { padding: 0 10px; }
   .card { padding: 16px; }
   .msg { max-width: 94%; }
   .topbar { flex-wrap: wrap; }
   .topbar-actions { width: 100%; justify-content: space-between; }
+}
+
+/* Pantallas bajas: se libera altura para el chat */
+@media (max-height: 520px) {
+  .badge { display: none; }
+  .topbar { padding: 8px 0 4px; }
+  .footer { padding: 2px 0 6px; }
 }

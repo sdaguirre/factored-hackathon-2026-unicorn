@@ -71,7 +71,12 @@
       <section id="view-ended" class="card view" aria-labelledby="ended-title" hidden>
         <h2 id="ended-title">Conversación terminada</h2>
         <p id="ended-text" class="muted"></p>
-        <button type="button" id="restart-btn" class="btn btn-primary">Nueva conversación</button>
+        <p id="ended-reply" class="ended-reply" hidden></p>
+        <p id="ended-email" class="muted" hidden></p>
+        <div class="row row-start">
+          <button type="button" id="pdf-btn" class="btn btn-quiet" hidden>Descargar resumen (PDF)</button>
+          <button type="button" id="restart-btn" class="btn btn-primary">Nueva conversación</button>
+        </div>
       </section>
     </main>
 
