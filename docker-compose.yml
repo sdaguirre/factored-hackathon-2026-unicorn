@@ -13,6 +13,11 @@ services:
         required: false
     environment:
       CHAT_ENV: ${CHAT_ENV:-dev}
+      CHAT_OFFERS_PATH: /data/offers/credit_offers.jsonl
+    # Ofertas aceptadas (filas de gold credit_offers): en una carpeta del host ignorada por git (.local/), para que
+    # sobrevivan a un reinicio y backend/scripts/sync_credit_offers.py las lea con --file .local/offers/credit_offers.jsonl.
+    volumes:
+      - ./.local/offers:/data/offers
     read_only: true
     tmpfs:
       - /tmp

@@ -42,6 +42,7 @@ NEEDS_DATA = "needs_data"
 DECLINED = "declined"
 UNAVAILABLE = "unavailable"                        # el cliente es elegible, pero no para ese plazo o monto
 
+AGE_REASON = "term_above_age_at_maturity"         # unavailable_reason de la referencia y de gold (politica 0.4)
 PRODUCT_CODE = {"personal_loan": "PL", "mortgage": "MG", "credit_card": "CC"}
 PRODUCT_NAME = {v: k for k, v in PRODUCT_CODE.items()}
 
@@ -67,11 +68,6 @@ def clean_profile(row: dict) -> dict:
 def offer_options(profile: dict, policy: Policy) -> list[dict]:
     """Opciones de gold para un perfil. Es la funcion que valida check_engine_parity.py --engine."""
     return ref.offer_options(clean_profile(profile), policy)
-
-
-def band_max_term(policy: Policy, band: str | None, product_code: str) -> int:
-    key = "max_term_personal_loan_months" if product_code == "PL" else "max_term_mortgage_months"
-    return next((b[key] for b in policy.bands if b["band"] == band), 0)
 
 
 @dataclass
@@ -135,8 +131,8 @@ def evaluate(profile: dict, policy: Policy, product: str, amount_usd: float | No
 
     if star is None:                                    # ninguna opcion del producto: por edad o por capacidad
         q.outcome, q.max_amount_usd = UNAVAILABLE, 0.0
-        band_max = band_max_term(policy, p.get("risk_band"), code) if code != "CC" else 0
-        by_age = [o for o in options if code != "CC" and o["term_months"] <= band_max and not o["term_allowed"]]
+        # El motivo por opcion lo fija la referencia (= gold unavailable_reason): edad o banda, nunca se recalcula aqui
+        by_age = any(o["unavailable_reason"] == AGE_REASON for o in options)
         q.reasons = ["PRODUCT_ABOVE_AGE_AT_MATURITY" if by_age and not any(o["term_allowed"] for o in options)
                      else "NO_CAPACITY_FOR_OPTION"]
         return q
@@ -154,8 +150,8 @@ def evaluate(profile: dict, policy: Policy, product: str, amount_usd: float | No
             return q
         opt = next((o for o in options if o["term_months"] == term), None)
         if opt is not None and not opt["term_allowed"]:
-            age_capped = term <= band_max_term(policy, p.get("risk_band"), code)
-            q.outcome, q.reasons = UNAVAILABLE, ["TERM_ABOVE_AGE_AT_MATURITY" if age_capped else "TERM_ABOVE_BAND_MAXIMUM"]
+            by_age = opt["unavailable_reason"] == AGE_REASON
+            q.outcome, q.reasons = UNAVAILABLE, ["TERM_ABOVE_AGE_AT_MATURITY" if by_age else "TERM_ABOVE_BAND_MAXIMUM"]
             q.term_months = term
             return q
 

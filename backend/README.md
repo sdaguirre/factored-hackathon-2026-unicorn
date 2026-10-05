@@ -188,7 +188,10 @@ python data/scripts/check_engine_parity.py --engine app.policy.engine:offer_opti
 - **Reglas.** Bandas A–E con ajuste por segmento; tasa de la grilla por plazo o nivel de tarjeta; plazo máximo por banda y,
   desde 0.4, por edad al vencimiento (el crédito termina antes de los 75 años; el backend nunca ve la fecha de nacimiento:
   gold entrega `max_term_*` ya recortados); límite del 20% sin margen; tarjeta de crédito por nivel (Clásica, Gold,
-  Platinum, Black). Un plazo rechazado por edad se explica distinto que uno rechazado por la banda.
+  Platinum, Black). Un plazo rechazado por edad se explica distinto que uno rechazado por la banda: el motivo sale de
+  `unavailable_reason` de la opción (`term_above_age_at_maturity`), el mismo de gold.
+- **Versión.** Al arrancar se compara la `policy_version` del perfil (export de gold) con la de `data/reference`: si no
+  coinciden, en `CHAT_ENV=dev` solo avisa y fuera de dev no arranca (un perfil 0.3 ofrecería plazos sin el tope por edad).
 - **Lo más alto primero.** Sin monto, el asistente propone la opción destacada (`is_featured` de gold) y pregunta cuánto
   necesita; «sí» toma ese máximo. «¿Qué ofertas tengo?» muestra la destacada de cada producto.
 - **Datos declarados.** Si el cliente dice su ingreso, reemplaza al registrado y la oferta queda **condicional** (`F03`): ya
@@ -200,7 +203,10 @@ python data/scripts/check_engine_parity.py --engine app.policy.engine:offer_opti
 - **Oferta aceptada.** «Sí» a avanzar llama a `accept_offer`: recalcula (nunca toma cifras del texto), valida monto y 20%,
   agrega `F02`/`F03`/`F04` y escribe la fila de gold `credit_offers` en `CHAT_OFFERS_PATH` (JSONL). Al derivar, la fila se
   reescribe con `status = handed_off` y el ticket. `scripts/sync_credit_offers.py` sube las filas a Databricks con `MERGE`
-  por `offer_id` (sin `--apply` solo muestra lo que subiría), así el contenedor no necesita credenciales.
+  por `offer_id` (sin `--apply` solo muestra lo que subiría), así el contenedor no necesita credenciales. Con Docker
+  Compose el archivo vive en `.local/offers/` del host (volumen, ignorado por git) y sobrevive a los reinicios:
+  `python backend/scripts/sync_credit_offers.py --file .local/offers/credit_offers.jsonl --gold-schema
+  workspace.gold_latam_bank_test --apply --profile <perfil> --warehouse-id <id>` (probarlo primero en `_test`).
 - **Reglas del agente** (`policy/agent_rules.yaml`): documentos por producto (y los de la persona del hogar si se sumó su
   ingreso) y atributos protegidos. `date_of_birth` solo se usa, en gold, para el tope de plazo por edad.
 

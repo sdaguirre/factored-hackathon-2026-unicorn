@@ -39,6 +39,20 @@ def _rewrite_kinds(settings: Settings) -> frozenset[str]:
     return frozenset() if raw == "none" else frozenset(k.strip() for k in raw.split(",") if k.strip())
 
 
+def check_policy_version(repo: SnapshotRepository, policy: eng.Policy, env: str) -> None:
+    """El perfil (export de gold) y la politica (data/reference) deben ser la misma version: un perfil 0.3 con la politica
+    0.4 ofreceria plazos que gold ya no permite (sin tope por edad). En prod no arranca; en dev solo avisa."""
+    found = repo.policy_versions()
+    if found == {policy.version}:
+        return
+    msg = (f"El perfil de credito es de la politica {sorted(found)} y la politica cargada es {policy.version}: "
+           "descargue de nuevo el export de gold (data/scripts/export_gold.py) y regenere el snapshot.")
+    if env == "dev":
+        logging.getLogger("chat").warning(msg)
+    else:
+        raise RuntimeError(msg)
+
+
 def build_state(settings: Settings) -> AppState:
     secret = settings.jwt_secret
     if not secret:
@@ -46,6 +60,7 @@ def build_state(settings: Settings) -> AppState:
         logging.getLogger("chat").warning("CHAT_JWT_SECRET vacio: se genero uno temporal; las sesiones no sobreviven al reinicio.")
     repo = SnapshotRepository(settings.data_dir)
     policy = eng.load_policy()
+    check_policy_version(repo, policy, settings.env)
     with open(settings.rules_path, encoding="utf-8") as f:
         rules = yaml.safe_load(f)
     queue = HandoffQueue()

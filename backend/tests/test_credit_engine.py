@@ -49,6 +49,34 @@ def test_policy_is_the_reference_version_with_a_hard_20_percent_limit():
     assert [b["band"] for b in POLICY.bands] == ["A", "B", "C", "D", "E"]
 
 
+def test_a_profile_from_another_policy_version_stops_the_app_outside_dev(tmp_path):
+    import shutil
+
+    import pandas as pd
+
+    from app.main import create_app
+    from tests.conftest import make_settings
+
+    for f in FIXTURE.glob("*.parquet"):
+        shutil.copy(f, tmp_path / f.name)
+    prof = pd.read_parquet(tmp_path / "credit_profile.parquet")
+    prof["policy_version"] = "0.3"                               # export viejo: max_term_* sin tope por edad
+    prof.to_parquet(tmp_path / "credit_profile.parquet", index=False)
+    with pytest.raises(RuntimeError, match="0.3"):
+        create_app(make_settings(env="prod", data_dir=tmp_path, admin_api_keys="adm"))
+    import logging
+
+    records = []
+    handler = logging.Handler()
+    handler.emit = records.append
+    logging.getLogger("chat").addHandler(handler)              # el logger de la app no propaga a caplog
+    try:
+        create_app(make_settings(env="dev", data_dir=tmp_path))  # en dev arranca y avisa
+    finally:
+        logging.getLogger("chat").removeHandler(handler)
+    assert any("export_gold" in r.getMessage() for r in records)
+
+
 def test_backend_options_are_the_reference_options(repo):
     for cid in ("FXC-001", "FXC-004", "FXC-012", "FXC-008"):
         p = repo.credit_profile(cid)

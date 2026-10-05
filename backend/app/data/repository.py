@@ -112,6 +112,10 @@ class SnapshotRepository:
         return Customer(cid, r.document_type, str(r.document_number), r.first_name, r.country,
                         r.segment, r.customer_status)
 
+    def policy_versions(self) -> set[str]:
+        """Versiones de politica con que gold calculo los perfiles cargados (deben ser la de data/reference)."""
+        return {str(p.get("policy_version")) for p in self._credit.values()}
+
     def credit_profile(self, customer_id: str) -> dict:
         """Fila de gold customer_credit_profile (montos en USD). Incluye accepts_marketing: el consentimiento SOLO gobierna
         las ofertas proactivas (offer_mode), nunca la respuesta a una solicitud del cliente."""

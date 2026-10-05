@@ -45,13 +45,13 @@ for r in repo._customers.itertuples():
     income = to_local(prof, prof.get("income_used_usd"))
     ok_kba = all(kba.build_challenge(repo, repo.find_by_document(str(r.document_number)), n=3, lang="es", as_of=AS_OF)
                  for _ in range(5))
-    band_mg = eng.band_max_term(policy, prof.get("risk_band"), "MG")
     rows.append(dict(cid=cid, doc=str(r.document_number), name=r.first_name, country=r.country, ccy=prof["local_currency"],
                      consent=prof["accepts_marketing"], income=income, score=prof.get("credit_score"),
                      dpd=prof.get("max_days_past_due") or 0, band=prof.get("risk_band"), mode=prof["offer_mode"],
                      codes=list(prof.get("reason_codes") or []), pre=bool(prof["is_eligible"]) and bool(offers.ordered),
                      featured={o["product_code"]: o for o in offers.ordered}, ok_kba=ok_kba,
-                     age_capped=bool(prof["is_eligible"]) and (prof.get("max_term_mortgage_months") or 0) < band_mg,
+                     age_capped=any(o["unavailable_reason"] == eng.AGE_REASON and o["product_code"] == "MG"
+                                    for o in offers.options),
                      complaints=prof.get("open_complaints") or 0))
 df = pd.DataFrame(rows)
 only = lambda code: df.codes.map(lambda c: c == [code])   # noqa: E731

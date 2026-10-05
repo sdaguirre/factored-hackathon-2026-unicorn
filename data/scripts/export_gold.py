@@ -13,6 +13,7 @@ Usage:
 """
 import argparse
 import json
+import shutil
 from pathlib import Path
 
 from databricks.sdk import WorkspaceClient
@@ -40,6 +41,9 @@ def main(args):
     catalog, schema = args.gold_schema.split(".")
     remote = f"/Volumes/{catalog}/{schema}/exports"
     out = Path(args.out)
+    if (out / "_manifest.json").exists():
+        # Una descarga anterior: se borra entera. Si no, los Parquet de dos exports se mezclan en la misma carpeta.
+        shutil.rmtree(out)
     n = download_tree(w, remote, out)
     manifest = json.loads((out / "_manifest.json").read_text(encoding="utf-8"))
     print(f"Downloaded {n} files from {remote} to {out}")
