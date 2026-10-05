@@ -34,6 +34,7 @@ snake_case; gold tables per customer are `customer_<subject>`.
 | `gold/30_customer_products_summary.sql` | `customer_products_summary` | gold | Job `latam_bank_medallion` |
 | `gold/31_customer_complaints_summary.sql` | `customer_complaints_summary` | gold | Job `latam_bank_medallion` |
 | `gold/32_customer_cashflow_summary.sql` | `customer_cashflow_summary` | gold | Job `latam_bank_medallion` |
+| `gold/33_customer_case_context.sql` | `customer_case_context` (open complaints + interactions unresolved in the last 90 days, per customer and case; no amounts or descriptions) | gold | **Not wired into the job yet**: add it after `silver_quality_checks` once the migration to the real schemas is validated. Local equivalent: `backend/scripts/case_context.py` |
 | `gold/90_quality_checks.sql` | Gold metrics in `pipeline_quality_metrics`, then a gate that fails the run | gold | Last task of both jobs |
 
 ## Gold objects

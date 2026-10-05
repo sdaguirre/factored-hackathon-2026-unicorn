@@ -56,6 +56,36 @@ def month_start(d: date) -> date:
     return d.replace(day=1)
 
 
+# (cliente, origen, categoria, tipo, prioridad, estado, dias abierto, escalado, SLA incumplido, sentimiento, reincidente, canal)
+# Cada fila ejercita un camino de la conversacion: caso pendiente, caso critico, enojo previo, caso viejo, varios casos.
+CASES = [
+    (1, "complaint", "Fees", "Complaint", "High", "In Process", 12, False, False, None, False, "App"),
+    (2, "complaint", "Transactions", "Claim", "Critical", "Escalated", 31, True, True, None, True, "Call Center"),
+    (2, "interaction", "Queja", None, None, "Unresolved", 9, True, False, "Muy Negativo", False, "Phone"),
+    (3, "interaction", "Queja", None, None, "Unresolved", 20, False, False, "Negativo", False, "Phone"),
+    (4, "interaction", "Transaccional", None, None, "Unresolved", 45, True, False, "Neutral", False, "Web Chat"),
+    (5, "complaint", "Service", "Complaint", "Low", "Open", 100, False, False, None, False, "Branch"),
+    (6, "complaint", "Technical", "Request", "Medium", "Open", 6, False, False, None, False, "Web"),
+    (6, "interaction", "Técnico", None, None, "Unresolved", 3, False, False, "Neutral", False, "WhatsApp"),
+]
+
+
+def make_case_context() -> pd.DataFrame:
+    """Casos abiertos INVENTADOS (misma forma que scripts/case_context.py). Generador propio: no altera el resto."""
+    r = random.Random(SEED + 202)
+    rows = []
+    for n, (i, src, cat, ctype, prio, status, days, esc, sla, sent, rep, chan) in enumerate(CASES, start=1):
+        opened = AS_OF - timedelta(days=days)
+        rows.append({
+            "customer_id": f"FXC-{i:03d}", "case_source": src,
+            "case_id": f"FXK-{n:03d}-{r.randrange(1000, 9999)}", "opened_on": opened.isoformat(), "days_open": days,
+            "channel": chan, "category": cat, "case_type": ctype, "priority": prio, "status": status,
+            "is_escalated": esc, "sla_breached": sla, "sentiment": sent, "is_repeat_complainer": rep,
+            "as_of_date": AS_OF.isoformat(),
+        })
+    return pd.DataFrame(rows)
+
+
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     branches = []
@@ -143,6 +173,9 @@ def main() -> None:
                 rate = (usd.get(b, 1.0) / usd.get(a, 1.0))
                 fx.append({"date": AS_OF.isoformat(), "source_currency": a, "target_currency": b, "exchange_rate": rate})
     pd.DataFrame(fx).to_parquet(OUT / "fx_rates.parquet", index=False)
+    cases = make_case_context()
+    cases.to_parquet(OUT / "case_context.parquet", index=False)
+    print(f"fixture: casos abiertos={len(cases)} en {cases.customer_id.nunique()} clientes")
     print(f"fixture: clientes={len(customers)} productos={len(products)} sucursales={len(branches)} movimientos={len(txs)} -> {OUT}")
 
 

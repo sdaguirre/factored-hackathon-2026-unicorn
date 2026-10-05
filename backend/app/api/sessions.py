@@ -1,9 +1,13 @@
 """Alta de sesion y verificacion de identidad por preguntas de seguridad."""
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends
 
 from app.agent import templates
+from app.agent.context import build_context
+from app.agent.tools import ToolContext, get_customer_context
 from app.api.schemas import (AuthState, CustomerSummary, QuestionOut, SessionCreate, SessionCreated, SessionInfo, VerifyRequest,
                              VerifyResponse)
 from app.auth import kba
@@ -11,8 +15,10 @@ from app.core.security import make_session_token
 from app.core.sessions import AUTHENTICATED, LOCKED, Session
 from app.deps import AppState, get_state, require_api_key, require_session
 from app.errors import ApiError
+from app.logging_setup import log
 
-router = APIRouter(prefix="/v1", tags=["sessions"], dependencies=[Depends(require_api_key)])
+logger = logging.getLogger(__name__)
+router =APIRouter(prefix="/v1", tags=["sessions"], dependencies=[Depends(require_api_key)])
 
 
 def _challenge_for(state: AppState, session: Session) -> kba.Challenge:
@@ -69,6 +75,12 @@ def verify(body: VerifyRequest, session: Session = Depends(require_session),
         c = session.candidate
         session.customer_id, session.first_name, session.country = c.customer_id, c.first_name, c.country
         session.state, session.challenge = AUTHENTICATED, None
+        # Lo que le quedo pendiente al cliente, leido una vez al autenticar. Un fallo aqui no debe impedir la conversacion.
+        try:
+            session.slots["context"] = get_customer_context(ToolContext(c.customer_id, state.repo, state.policy))
+        except Exception as exc:
+            log(logger, "context_unavailable", error=type(exc).__name__)
+            session.slots["context"] = build_context([], [])
         state.lockout.register_success(session.doc_key)
         greeting = templates.render("welcome", session.language, {"first_name": c.first_name})
         return VerifyResponse(status="authenticated", attempts_left=s.auth_max_attempts - session.auth_attempts_used,

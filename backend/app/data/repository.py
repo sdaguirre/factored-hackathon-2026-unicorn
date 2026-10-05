@@ -43,6 +43,15 @@ class CustomerRepository(Protocol):
     def fx_rate(self, source: str, target: str) -> FxQuote | None: ...
     def contact_email_masked(self, customer_id: str) -> str | None: ...
     def documents_on_file(self, customer_id: str) -> set[str]: ...
+    def case_context(self, customer_id: str) -> list[dict]: ...
+    def product_overview(self, customer_id: str) -> list[dict]: ...
+
+
+# Lo unico que el agente puede saber de un caso abierto y de un producto. Es una lista blanca a proposito: el chat solo
+# confirma que existen y los deriva; nunca detalla saldos, limites, montos reclamados ni descripciones.
+CASE_FIELDS = ("case_source", "case_id", "opened_on", "days_open", "channel", "category", "case_type", "priority", "status",
+               "is_escalated", "sla_breached", "sentiment", "is_repeat_complainer")
+PRODUCT_FIELDS = ("product_type", "last4", "product_status")
 
 
 def _clean(v):
@@ -74,6 +83,12 @@ class SnapshotRepository:
         if fx_path.exists():
             for r in pd.read_parquet(fx_path).itertuples():
                 self._fx[(r.source_currency, r.target_currency)] = (float(r.exchange_rate), str(r.date)[:10])
+        # Casos abiertos por cliente (opcional): sin el archivo, el agente simplemente no tiene historial pendiente.
+        self._cases: dict[str, list[dict]] = {}
+        cases_path = data_dir / "case_context.parquet"
+        if cases_path.exists():
+            for cid, g in pd.read_parquet(cases_path).groupby("customer_id"):
+                self._cases[cid] = [{k: _clean(v) for k, v in rec.items()} for rec in g[list(CASE_FIELDS)].to_dict("records")]
 
     def find_by_document(self, document_number: str) -> Customer | None:
         cid = self._by_doc.get(str(document_number).strip())
@@ -140,6 +155,14 @@ class SnapshotRepository:
             return {"id_copy"}
         raw = _clean(self._cust.loc[customer_id].docs_on_file)
         return {d for d in str(raw).split(",") if d} if raw else set()
+
+    def case_context(self, customer_id: str) -> list[dict]:
+        """Casos abiertos del cliente (reclamos abiertos e interacciones sin resolver), solo con CASE_FIELDS."""
+        return [dict(c) for c in self._cases.get(customer_id, [])]
+
+    def product_overview(self, customer_id: str) -> list[dict]:
+        """Existencia de productos: tipo, terminacion y estado. Nada de saldos, limites ni fechas."""
+        return [{k: _clean(p.get(k)) for k in PRODUCT_FIELDS} for p in self.products(customer_id)]
 
     def sample_documents(self, n: int = 5) -> list[str]:
         """Solo para pruebas y README (datos sinteticos)."""

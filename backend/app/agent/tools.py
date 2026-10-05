@@ -9,6 +9,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from app.agent.context import build_context
 from app.data.repository import CustomerRepository
 from app.policy import credit_engine as ce
 
@@ -39,6 +40,14 @@ def get_profile(ctx: ToolContext) -> dict:
     profile = ctx.repo.credit_profile(ctx.customer_id)
     ctx.trace.append({"tool": "customer_profile", "profile": profile})
     return profile
+
+
+def get_customer_context(ctx: ToolContext) -> dict:
+    """Casos abiertos y existencia de productos del cliente de la sesion (ver agent/context.py). Solo lectura."""
+    context = build_context(ctx.repo.case_context(ctx.customer_id), ctx.repo.product_overview(ctx.customer_id))
+    ctx.trace.append({"tool": "customer_context", "open_cases": context["counts"]["open"],
+                      "products": len(context["products"])})
+    return context
 
 
 def evaluate_credit(ctx: ToolContext, product: str, amount: float, months: int,
