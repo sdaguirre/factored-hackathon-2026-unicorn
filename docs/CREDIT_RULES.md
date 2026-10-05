@@ -87,7 +87,9 @@ When the birth date is missing there is no cap and the advisor verifies age.
 Age is used **only** for this explicit term rule, never as a risk-model feature or to change the
 amount or rate; gender, marital status and accent are not used at all (they serve only to
 measure bias). At the 2026-06-30 cutoff, 19,256 of the 50,707 eligible customers have no
-mortgage term available because of age and 8,677 no personal loan term; their card offer stands.
+mortgage term left because of age (cap below 180 months) and 8,677 no personal loan term (cap
+below 24 months); their card offer stands. No customer is missing a birth date at this cutoff.
+Breakdown by age bracket: `docs/EVALUATION.md` section 4.
 
 Segment adjustment (`ref_segment_adjustments`): Premium −1.0 pp, Plus −0.5 pp, Basic 0,
 Student +1.0 pp.

@@ -1,13 +1,15 @@
 -- =============================================================================================
 -- Bias check for the age-at-maturity term cap (policy 0.4, docs/CREDIT_RULES.md section 3).
 -- Eligible customers by age bracket at the cutoff: how many keep a personal loan and a mortgage,
--- and how many lose a loan product only because of age. Age comes from silver customers and is
+-- how many have no term left for a loan product because of age (the age cap is below the shortest
+-- grid term: 24 months for personal loans, 180 for mortgages; every band allows at least those),
+-- and how many keep a mortgage with fewer terms. A missing birth date means no age cap. Age comes from silver customers and is
 -- used here to MEASURE the rule, as allowed for protected attributes.
 -- Parameters (catalog.schema): :silver_schema, :gold_schema. Read-only.
 -- =============================================================================================
 
 WITH eligible AS (
-    SELECT p.customer_id,
+    SELECT p.customer_id, p.max_term_personal_loan_months, p.max_term_mortgage_months,
            CAST(floor(months_between(p.as_of_date, c.date_of_birth) / 12) AS INT) AS age
     FROM IDENTIFIER(:gold_schema || '.customer_credit_profile') p
     JOIN IDENTIFIER(:silver_schema || '.customers') c USING (customer_id)
@@ -17,7 +19,6 @@ per_customer AS (
     SELECT o.customer_id,
            bool_or(o.product_code = 'PL' AND o.is_available)                                  AS has_pl,
            bool_or(o.product_code = 'MG' AND o.is_available)                                  AS has_mg,
-           bool_or(o.product_code = 'PL' AND o.unavailable_reason = 'term_above_age_at_maturity') AS pl_term_cut_by_age,
            bool_or(o.product_code = 'MG' AND o.unavailable_reason = 'term_above_age_at_maturity') AS mg_term_cut_by_age
     FROM IDENTIFIER(:gold_schema || '.customer_credit_offer_options') o
     JOIN eligible e USING (customer_id)
@@ -31,8 +32,8 @@ SELECT
     count(*)                                                                        AS eligible,
     count_if(has_pl)                                                                AS with_personal_loan,
     count_if(has_mg)                                                                AS with_mortgage,
-    count_if(NOT has_pl AND pl_term_cut_by_age)                                     AS personal_loan_lost_to_age,
-    count_if(NOT has_mg AND mg_term_cut_by_age)                                     AS mortgage_lost_to_age,
+    count_if(e.max_term_personal_loan_months < 24)                                  AS personal_loan_no_term_by_age,
+    count_if(e.max_term_mortgage_months < 180)                                      AS mortgage_no_term_by_age,
     count_if(has_mg AND mg_term_cut_by_age)                                         AS mortgage_shortened_by_age
 FROM per_customer pc
 JOIN eligible e USING (customer_id)
