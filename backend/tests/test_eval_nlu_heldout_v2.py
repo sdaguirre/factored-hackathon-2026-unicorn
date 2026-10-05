@@ -41,6 +41,7 @@ class FakeAnthropicLLM(llm_anthropic.AnthropicLLM):
 
     def _create(self, *, model, max_tokens, system, messages):
         text = re.search(r"<user_message>(.*)</user_message>", messages[0]["content"], re.S).group(1)
+        text = text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")   # the client escapes the message
         self._calls += 1
         if self._calls > len(HELDOUT_V2):                       # second run of the same client
             intent = "unknown" if text == SECOND else LABEL[text]
