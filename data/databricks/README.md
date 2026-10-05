@@ -127,6 +127,20 @@ python data/scripts/run_databricks_sql.py data/databricks/gold/00_deploy_objects
 
 The SQL files can also be opened in the SQL editor, which asks for the parameter values.
 
+## Export for the demo backend
+
+The data is static, so the backend reads a one-time Parquet export instead of querying
+Databricks (no credentials in the container):
+
+```bash
+python data/scripts/export_gold.py --profile <profile> --warehouse-id <id>   # -> .local/gold/ (git-ignored)
+python data/scripts/check_engine_parity.py                                   # engine vs gold options
+```
+
+It exports `customer_credit_profile`, `customer_credit_offer_options` and the `ref_*` tables.
+`data/policy/credit_policy.py` is a reference implementation of the policy that matches gold on
+all options; see `docs/ENGINE_ALIGNMENT.md` for the backend changes.
+
 ## One-time migration notes
 
 - The customer summaries used to be views (`gold_customer_*_summary`). `CREATE OR REPLACE TABLE`
