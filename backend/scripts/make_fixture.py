@@ -67,7 +67,7 @@ NO_DATA_CUSTOMER = "FXC-010"
 # Meses hasta los 75 anos (tope de plazo por edad, politica 0.4). Solo este cliente: su banda B permite hipotecas a 360 meses,
 # pero la edad las limita a 200 (15 anos si, 20 no). Al resto no se le fija fecha de nacimiento: sin tope, como en gold.
 AGE_CAP_MONTHS = {"FXC-012": 200}
-FX_PER_USD = {"MXN": 17.30, "COP": 4000.0, "ARS": 350.0}     # tasas inventadas, las mismas de fx_rates.parquet      # el cliente al que le faltan datos para el reto de seguridad (escenario I), a proposito
+FX_PER_USD = {"MXN": 17.30, "COP": 4000.0, "ARS": 350.0}     # invented rates; they go to fx_to_usd in credit_profile.parquet      # el cliente al que le faltan datos para el reto de seguridad (escenario I), a proposito
 
 
 def add_security_question_data(customers: list[dict], products: list[dict]) -> None:
@@ -269,24 +269,15 @@ def main() -> None:
     pd.DataFrame(customers).to_parquet(OUT / "customers.parquet", index=False)
     pd.DataFrame(products).to_parquet(OUT / "products.parquet", index=False)
     pd.DataFrame(branches).to_parquet(OUT / "branches.parquet", index=False)
-    pd.DataFrame(txs).to_parquet(OUT / "transactions.parquet", index=False)
-    # Tasas de referencia INVENTADAS por el equipo (la forma del dataset: una fila por par de monedas y fecha de corte).
-    usd = FX_PER_USD
-    fx = []
-    for a in ["USD", "MXN", "COP", "ARS"]:
-        for b in ["USD", "MXN", "COP", "ARS"]:
-            if a != b:
-                rate = (usd.get(b, 1.0) / usd.get(a, 1.0))
-                fx.append({"date": AS_OF.isoformat(), "source_currency": a, "target_currency": b, "exchange_rate": rate})
-    pd.DataFrame(fx).to_parquet(OUT / "fx_rates.parquet", index=False)
+    # The assistant reads only the gold-shaped credit profile: no transactions, FX or case files are written.
+    # The invented cases only feed the complaint counts of the profile (as complaints feed gold).
     cases = make_case_context()
-    cases.to_parquet(OUT / "case_context.parquet", index=False)
     credit = make_credit_profiles(customers, products, SPEC, cases)
     credit.to_parquet(OUT / "credit_profile.parquet", index=False)
     print(f"fixture: perfil de credito (politica {credit.policy_version.iloc[0]}): elegibles={int(credit.is_eligible.sum())} "
           f"proactivos={int((credit.offer_mode == 'proactive').sum())} de {len(credit)}")
     print(f"fixture: casos abiertos={len(cases)} en {cases.customer_id.nunique()} clientes")
-    print(f"fixture: clientes={len(customers)} productos={len(products)} sucursales={len(branches)} movimientos={len(txs)} -> {OUT}")
+    print(f"fixture: clientes={len(customers)} productos={len(products)} sucursales={len(branches)} -> {OUT}")
 
 
 if __name__ == "__main__":
