@@ -28,6 +28,7 @@ resources:
       trigger:
         pause_status: PAUSED
         table_update:
+          condition: ANY_UPDATED   # required when more than one table is watched
           table_names:
             - ${var.silver_schema}.ref_policy_params
             - ${var.silver_schema}.ref_policy_bands
