@@ -7,6 +7,9 @@
 -- Parameter :silver_schema (catalog.schema) selects where the ref_* tables are created
 -- (workspace.silver_latam_bank_test or workspace.silver_latam_bank); the CSVs are always read from
 -- the volume workspace.silver_latam_bank.reference.
+-- The volume's schema is created first so the script also works on an empty workspace.
+
+CREATE SCHEMA IF NOT EXISTS workspace.silver_latam_bank;
 
 CREATE VOLUME IF NOT EXISTS workspace.silver_latam_bank.reference
 COMMENT 'Source CSVs for the synthetic reference tables (silver.ref_*). Source of truth: data/reference/ in the team repo.';
