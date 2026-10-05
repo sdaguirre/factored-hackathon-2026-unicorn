@@ -34,8 +34,8 @@ snake_case; gold tables per customer are `customer_<subject>`.
 | `gold/30_customer_products_summary.sql` | `customer_products_summary` | gold | Job `latam_bank_medallion` |
 | `gold/31_customer_complaints_summary.sql` | `customer_complaints_summary` | gold | Job `latam_bank_medallion` |
 | `gold/32_customer_cashflow_summary.sql` | `customer_cashflow_summary` | gold | Job `latam_bank_medallion` |
-| `gold/33_customer_case_context.sql` | `customer_case_context` (open complaints + interactions unresolved in the last 90 days, per customer and case; no amounts or descriptions) | gold | **Not wired into the job yet**: add it after `silver_quality_checks` once the migration to the real schemas is validated. Local equivalent: `backend/scripts/case_context.py` |
-| `gold/90_quality_checks.sql` | Gold metrics in `pipeline_quality_metrics`, then a gate that fails the run | gold | Last task of both jobs |
+| `gold/90_quality_checks.sql` | Gold metrics in `pipeline_quality_metrics`, then a gate that fails the run | gold | Both jobs, after the gold tables |
+| `gold/95_export_for_serving.py` | Parquet export of the profile, offer options and `ref_*` to the volume `<gold_schema>.exports`, with `_manifest.json` | gold | Last task of both jobs, only after the checks pass |
 
 ## Gold objects
 
@@ -81,8 +81,8 @@ default to the target's variables (`dev` → `_test`, `prod` → real schemas).
 
 | Job | Tasks | Trigger |
 |---|---|---|
-| `latam_bank_medallion` | `bronze_load` → `silver_typed_dedup` → `silver_quality_checks` → `gold_deploy_objects` → `gold_customer_credit_profile` → `gold_customer_credit_offer_options`; the three customer summaries in parallel after the silver checks; `gold_quality_checks` last | Daily at 06:00 America/Bogota, deployed **paused** (static data: run by hand) |
-| `credit_policy_refresh` | `gold_customer_credit_profile` → `gold_customer_credit_offer_options` → `gold_quality_checks` | When the policy changes: by hand, or the (paused) `table_update` trigger on the policy `ref_*` tables |
+| `latam_bank_medallion` | `bronze_load` → `silver_typed_dedup` → `silver_quality_checks` → `gold_deploy_objects` → `gold_customer_credit_profile` → `gold_customer_credit_offer_options`; the three customer summaries in parallel after the silver checks; `gold_quality_checks` → `gold_export_for_serving` last | Daily at 06:00 America/Bogota, deployed **paused** (static data: run by hand) |
+| `credit_policy_refresh` | `gold_customer_credit_profile` → `gold_customer_credit_offer_options` → `gold_quality_checks` → `gold_export_for_serving` | When the policy changes: by hand, or the (paused) `table_update` trigger on the policy `ref_*` tables |
 | `credit_gold_deploy` | `gold_deploy_objects` | Manual, once per deploy |
 
 - **Parameter `as_of_date`** (`YYYY-MM-DD`): empty uses the policy cutoff in
@@ -127,6 +127,30 @@ python data/scripts/run_databricks_sql.py data/databricks/gold/00_deploy_objects
 ```
 
 The SQL files can also be opened in the SQL editor, which asks for the parameter values.
+
+## Export for the demo backend
+
+The backend reads Parquet instead of querying Databricks (no credentials in the container). The
+export is part of the pipeline: the last task of `latam_bank_medallion` and `credit_policy_refresh`
+(`gold/95_export_for_serving.py`) writes it to the volume `<gold_schema>.exports` only after the gold
+checks pass, so the demo always serves validated data:
+
+```
+/Volumes/workspace/gold_latam_bank/exports/
+  customer_credit_profile/  customer_credit_offer_options/  ref_*/   one Parquet file each
+  _manifest.json            rows per table, as_of_date, policy_version, run id, export time
+```
+
+The task checks that every exported table has the same row count as its source. Download it for
+the demo and check an engine against it:
+
+```bash
+python data/scripts/export_gold.py --profile <profile>     # -> .local/gold/ (git-ignored)
+python data/scripts/check_engine_parity.py                 # engine vs gold options
+```
+
+`data/policy/credit_policy.py` is a reference implementation of the policy that matches gold on
+all options; see `docs/ENGINE_ALIGNMENT.md` for the backend changes.
 
 ## One-time migration notes
 
