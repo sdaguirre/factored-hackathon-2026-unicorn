@@ -36,6 +36,7 @@ snake_case; gold tables per customer are `customer_<subject>`.
 | `gold/32_customer_cashflow_summary.sql` | `customer_cashflow_summary` | gold | Job `latam_bank_medallion` |
 | `gold/90_quality_checks.sql` | Gold metrics in `pipeline_quality_metrics`, then a gate that fails the run | gold | Both jobs, after the gold tables |
 | `gold/95_export_for_serving.py` | Parquet export of the profile, offer options and `ref_*` to the volume `<gold_schema>.exports`, with `_manifest.json` | gold | Last task of both jobs, only after the checks pass |
+| `tests/00_update_fixture_setup.sql`, `tests/99_update_fixture_assertions.sql` | Labeled test delivery on `*_fixture` schemas and the assertions of each case | fixture | Job `data_update_fixture_test` |
 
 ## Gold objects
 
@@ -76,8 +77,38 @@ Gold checks (`gold/90_quality_checks.sql`) fail the run when: the profile does n
 silver customer; cutoff, policy version or exchange rate is missing; the profile was built with a
 different policy version than silver; the eligible share leaves 20–50%; the options are not one per
 customer and grid row; any available option exceeds the 20% capacity, the band maximum term or its
-amount range; a product with available options has not exactly one featured option; or a
-customer summary has duplicate customers.
+amount range; a product with available options has not exactly one featured option; a
+customer summary has duplicate customers; or the gold contract is broken.
+
+### Gold contract for the API
+
+`gold/90_quality_checks.sql` (check 10, `contract_violations`) fails the run if any of these columns
+is missing or changes type. They are what the backend and `data/policy/credit_policy.py` read.
+
+| Table | Columns (type) |
+|---|---|
+| `customer_credit_profile` | `customer_id`, `offer_mode`, `not_proactive_reason`, `risk_band`, `segment`, `local_currency`, `income_source`, `policy_version` (string); `is_eligible`, `requires_advisor_review`, `can_become_eligible_with_declared_income` (boolean); `reason_codes` (array<string>); `fx_to_usd`, `income_used_usd`, `current_installments_usd`, `max_total_installment_usd`, `available_installment_usd`, `total_rate_adjustment_pp` (double); `max_term_personal_loan_months`, `max_term_mortgage_months` (int); `open_complaints`, `open_priority_complaints`, `open_critical_complaints` (bigint); `fx_date`, `as_of_date` (date) |
+| `customer_credit_offer_options` | `customer_id`, `option_code`, `product_code`, `product_type`, `tier`, `unavailable_reason`, `offer_mode`, `local_currency` (string); `term_months`, `option_min_amount_usd`, `option_max_amount_usd` (int); `is_available`, `is_featured` (boolean); `offer_max_amount_usd` (bigint); `offer_rate_pct`, `offer_monthly_installment_usd`, `offer_max_amount_local`, `offer_monthly_installment_local`, `fx_to_usd` (double) |
+
+Adding columns is safe; renaming, dropping or retyping one of these needs a coordinated change.
+
+### Update correctness on static data (test fixture)
+
+The data is static, so the job `data_update_fixture_test` shows that a new delivery is handled
+correctly. It copies a bronze sample to `*_fixture` schemas, appends a **labeled test delivery**
+(`_source_file_path = 'fixture://update-correctness/<case>'`), runs the production `02_silver.sql`
+and `02_silver_quality_checks.sql` unchanged, and asserts each case
+(`tests/00_update_fixture_setup.sql`, `tests/99_update_fixture_assertions.sql`):
+
+| Case | Delivery | Expected and observed |
+|---|---|---|
+| Late status update | An existing complaint arrives again 5 days later as `Resolved` | Silver keeps one row, `Resolved` |
+| Exact duplicate | A transaction delivered twice | Bronze 2 rows, silver 1; `key_duplicates_removed_share` > 0 (ok) |
+| Late arrival | A complaint created in 2024 arrives with the June 2026 delivery | Present in silver with its 2024 `creation_date` |
+| Schema change | A row with an unknown column (`_rescued_data`) | Loaded to silver; `rescued_rows` = 1 (warn) |
+| Null key | A transaction without `transaction_id` | Dropped in silver; `null_key_rows` = 1 (warn) |
+
+All five pass; run against a silver without the fixture delivery, the assertions fail as expected.
 
 ## Jobs (Databricks Asset Bundle)
 
@@ -89,6 +120,7 @@ default to the target's variables (`dev` → `_test`, `prod` → real schemas).
 | `latam_bank_medallion` | `bronze_load` → `silver_typed_dedup` → `silver_quality_checks` → `gold_deploy_objects` → `gold_customer_credit_profile` → `gold_customer_credit_offer_options`; the three customer summaries in parallel after the silver checks; `gold_quality_checks` → `gold_export_for_serving` last | Daily at 06:00 America/Bogota, deployed **paused** (static data: run by hand) |
 | `credit_policy_refresh` | `gold_customer_credit_profile` → `gold_customer_credit_offer_options` → `gold_quality_checks` → `gold_export_for_serving` | When the policy changes: by hand, or the (paused) `table_update` trigger on the policy `ref_*` tables |
 | `credit_gold_deploy` | `gold_deploy_objects` | Manual, once per deploy |
+| `data_update_fixture_test` | `fixture_setup` → `silver_typed_dedup` → `silver_quality_checks` → `fixture_assertions`, on the `*_fixture` schemas | Manual; shows update correctness on static data |
 
 - **Parameter `as_of_date`** (`YYYY-MM-DD`): empty uses the policy cutoff in
   `ref_policy_params` (2026-06-30 for the static hackathon data). With live data, set its
