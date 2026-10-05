@@ -63,12 +63,12 @@ un snapshot local) y la inyección con muchas variantes contra el modelo real.
   elegible, 27,2% datos faltantes, 18,5% revisión humana, 10,1% rechazado. Una preaprobación fija por segmento
   (Premium y Plus) aprobaría clientes que la política rechaza en 3,9% o manda a pedir datos en 27,4%, y dejaría fuera a un
   40,6% que sí es elegible. Es la política preliminar del backend: no hay verdad de terreno externa.
-- **Política de crédito 0.3 en gold** (Databricks, 150.000 clientes, corte 2026-06-30): 50.707 elegibles (33,8%), 24.953
-  con oferta proactiva y 25.754 solo si el cliente pregunta. La implementación de referencia en Python
-  (`data/policy/credit_policy.py`) coincide con gold en las 1.800.000 opciones (`data/scripts/check_engine_parity.py`).
-- **Calidad del pipeline de datos:** 90 métricas por corrida en `pipeline_quality_metrics`; 0 duplicados por clave y 0 de
-  contenido salvo 6 `product_number` repetidos; el gold construido sobre el silver tipado es idéntico al anterior cliente
-  por cliente. Fixture de actualización (datos estáticos): 5 de 5 casos resueltos y las aserciones fallan sin la entrega.
+- **Credit policy 0.3 in gold** (Databricks, 150,000 customers, cutoff 2026-06-30): 50,707 eligible (33.8%), 24,953 with a
+  proactive offer and 25,754 only if the customer asks. The Python reference implementation
+  (`data/policy/credit_policy.py`) matches gold on all 1,800,000 options (`data/scripts/check_engine_parity.py`).
+- **Data pipeline quality:** 90 metrics per run in `pipeline_quality_metrics`; 0 key duplicates and 0 content duplicates
+  except 6 repeated `product_number` values; gold built on the typed silver is identical to the previous one, customer by
+  customer. Update fixture (static data): 5 of 5 cases handled correctly, and the assertions fail without the delivery.
 - **Triaje de fraude** (conjunto de prueba de 686.502 transacciones y 603 fraudes, partición temporal): el `fraud_score`
   del organizador da PR-AUC 0,577 y recall 58% revisando el 1% de mayor riesgo, con precisión de 5%. Un modelo sin
   `fraud_score` queda al nivel del azar (PR-AUC 0,0009).
