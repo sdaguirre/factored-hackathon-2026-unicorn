@@ -76,7 +76,9 @@ _SENSITIVE = re.compile(r"(fraude|fraud|robo|robaron|roubo|roubaram|estafa|golpe
                         r"queja|disputa|cobro indebido|cobranca indevida|perdi|extravi|bloquead|bloquearon|clonad|"
                         # uso no autorizado: "usaron mi tarjeta", "sin mi permiso", "sem minha autorizacao"
                         r"sin (mi )?(permiso|autorizacion|consentimiento)|sem (a )?(minha )?(permissao|autorizacao)|"
-                        r"no autoric|nao autoriz|sin que yo|usaron mi|usou meu|usaram meu|suplant|vitima|hackearon|hackeado)")
+                        r"no autoric|nao autoriz|sin que yo|usaron mi|usou meu|usaram meu|suplant|vitima|hackearon|hackeado|"
+                        # compras o cobros que el cliente no hizo, o cobrados de mas
+                        r"no (la |lo )?hice|nao (a |o )?fiz|no fui yo|nao fui eu|dos veces|duas vezes|cobr[a-z]* de mas|cobr[a-z]* a mais)")
 _NEGATIVE = re.compile(r"(pesim|horrible|molest|enoj|furios|harto|harta|odio|verguenza|inaceitavel|ruim|irritad|"
                        r"indignad|nunca mas|absurdo)")
 
