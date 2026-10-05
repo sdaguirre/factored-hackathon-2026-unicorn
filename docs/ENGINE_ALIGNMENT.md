@@ -47,7 +47,7 @@ pytest data/policy                                         # worked example
 | Hard filters | Status, missing data, delinquency 30/90 | R01–R08 in gold `reason_codes`; only R05 (income) and R08 (capacity) change with chat data |
 | Declared income | Uplift above 50% goes to review | Replaces income used; offer conditional with `F03`; no uplift handoff |
 | Household income | Not asked | Ask every customer (not by marital status); when added, also ask that person's installments and pass both to `recalculate(additional_income_usd=..., external_installments_usd=...)` |
-| Age | Not used | Term capped so loans end before 75 (`max_term_*` in the profile already include it) |
+| Age | Not used; `date_of_birth` is listed under `protected_attributes` in `credit_policy.yaml` | Term capped so loans end before 75 (`max_term_*` in the profile already include it). Explain `term_above_age_at_maturity` differently from `term_above_band_maximum`. Update `protected_attributes`: birth date is used only for this term rule, never for risk, amount or rate |
 | Proactive offer | Consent + moment + not pre-approved on declared income | Same, but eligibility and mode from gold `offer_mode` (`proactive` only with consent and no open critical complaint) |
 | Currency | Income currency (local) | USD internally (`fx_to_usd`); local only for display |
 | Flags | — | `F02_NEAR_LIMIT_DECLARED_INCOME`, `F03_DECLARED_DATA`, `F04_OPEN_COMPLAINTS` |

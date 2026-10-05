@@ -1,13 +1,13 @@
 """Checks that an offer engine reproduces gold customer_credit_offer_options exactly.
 
 Reads the gold export downloaded by data/scripts/export_gold.py (.local/gold/) and, for each customer profile,
-compares the engine options with gold on availability, maximum amount, rate, installment and
-the featured option.
+compares the engine options with gold on availability, maximum amount, rate, installment,
+the featured option and the unavailable reason.
 It also checks that recalculate() with no declared data leaves every option unchanged.
 
 The engine is any function `fn(profile: dict, policy) -> list[dict]` returning dicts with
 option_code, term_months, is_available, offer_max_amount_usd, offer_rate_pct,
-offer_monthly_installment_usd and is_featured. Default: the reference implementation in data/policy.
+offer_monthly_installment_usd, is_featured and unavailable_reason. Default: the reference implementation in data/policy.
 
 Usage:
     python data/scripts/check_engine_parity.py                       # reference engine, all customers
@@ -52,6 +52,11 @@ def same(a, b) -> bool:
     return abs(float(a) - float(b)) <= TOL
 
 
+def text(v) -> str | None:
+    """None for missing text values, including NaN from pandas."""
+    return None if v is None or (isinstance(v, float) and math.isnan(v)) else str(v)
+
+
 def main(args):
     for extra in args.pythonpath or []:
         sys.path.insert(0, str(Path(extra).resolve()))
@@ -80,7 +85,8 @@ def main(args):
                   and same(o["offer_max_amount_usd"], g.offer_max_amount_usd)
                   and same(o["offer_rate_pct"], g.offer_rate_pct)
                   and same(o["offer_monthly_installment_usd"], g.offer_monthly_installment_usd)
-                  and bool(o.get("is_featured")) == bool(g.is_featured))
+                  and bool(o.get("is_featured")) == bool(g.is_featured)
+                  and text(o.get("unavailable_reason")) == text(g.unavailable_reason))
             if not ok:
                 mismatches += 1
                 if len(examples) < 5:
