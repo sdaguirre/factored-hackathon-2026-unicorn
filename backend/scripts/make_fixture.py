@@ -67,7 +67,7 @@ NO_DATA_CUSTOMER = "FXC-010"
 # Meses hasta los 75 anos (tope de plazo por edad, politica 0.4). Solo este cliente: su banda B permite hipotecas a 360 meses,
 # pero la edad las limita a 200 (15 anos si, 20 no). Al resto no se le fija fecha de nacimiento: sin tope, como en gold.
 AGE_CAP_MONTHS = {"FXC-012": 200}
-FX_PER_USD = {"MXN": 17.30, "COP": 4000.0, "ARS": 350.0}     # invented rates; they go to fx_to_usd in credit_profile.parquet      # el cliente al que le faltan datos para el reto de seguridad (escenario I), a proposito
+FX_PER_USD = {"MXN": 17.30, "COP": 4000.0, "ARS": 350.0}     # invented rates; they go to fx_to_usd in credit_profile.parquet
 
 
 def add_security_question_data(customers: list[dict], products: list[dict]) -> None:
@@ -206,7 +206,7 @@ def main() -> None:
     br_by_country = {c: [b for b in branches if b["country"] == c] for c in CITIES}
 
     used_docs: set[str] = set()
-    customers, products, txs = [], [], []
+    customers, products = [], []
     for i, (country, consent, score, income, debt_ratio, dpd, with_tx) in enumerate(SPEC, start=1):
         cid = f"FXC-{i:03d}"
         doc = f"{rng.randrange(10_000_000, 99_999_999)}"
@@ -214,7 +214,7 @@ def main() -> None:
             doc = f"{rng.randrange(10_000_000, 99_999_999)}"
         used_docs.add(doc)
         ccy = CCY[country]
-        home = rng.choice(CITIES[country])
+        rng.choice(CITIES[country])                      # former home city of the transactions: draw kept
 
         n_prod = rng.choice([3, 3, 4])
         types = rng.sample(PRODUCTS, k=n_prod)
@@ -249,6 +249,8 @@ def main() -> None:
         customers[-1]["docs_on_file"] = ",".join(sorted(on_file))
 
         if with_tx:
+            # No transactions are written anymore (the assistant reads only the gold-shaped profile), but the same random
+            # draws are kept: the generator is shared, so dropping them would change every later customer of the fixture.
             seen: set[tuple[str, date]] = set()
             scale = (income or 1_000) / 40
             for _ in range(rng.randrange(8, 13)):
@@ -258,12 +260,12 @@ def main() -> None:
                     if (ttype, day) not in seen:
                         seen.add((ttype, day))
                         break
-                city = home if rng.random() < 0.8 else rng.choice(CITIES[country])
-                txs.append({"transaction_id": f"FXT-{len(txs):05d}", "customer_id": cid, "product_id": rng.choice(cust_products),
-                            "transaction_date": datetime(day.year, day.month, day.day, rng.randrange(8, 22), rng.randrange(60)),
-                            "transaction_type": ttype, "amount": round(float(nrng.lognormal(mean=np.log(scale), sigma=0.6)), 2),
-                            "currency": ccy, "merchant_name": rng.choice(MERCHANTS) if ttype == "Purchase" else None,
-                            "transaction_city": city, "transaction_country": country})
+                if rng.random() >= 0.8:
+                    rng.choice(CITIES[country])
+                rng.choice(cust_products), rng.randrange(8, 22), rng.randrange(60)
+                nrng.lognormal(mean=np.log(scale), sigma=0.6)
+                if ttype == "Purchase":
+                    rng.choice(MERCHANTS)
 
     add_security_question_data(customers, products)
     pd.DataFrame(customers).to_parquet(OUT / "customers.parquet", index=False)
