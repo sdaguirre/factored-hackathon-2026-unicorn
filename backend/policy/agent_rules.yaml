@@ -1,0 +1,24 @@
+# REGLAS DEL AGENTE - SINTETICAS
+# Definidas por el equipo para el hackathon. No es una politica bancaria real.
+# Las reglas de credito (bandas, tasas, plazos, limite del 20%) NO estan aqui: son la politica 0.4 de
+# docs/CREDIT_RULES.md, con parametros en data/reference/*.csv, la misma que calcula gold (app/policy/engine.py).
+# Este archivo solo tiene lo que decide el agente alrededor de la oferta: documentos y atributos protegidos.
+synthetic: true
+
+# Atributos que NO pueden usarse para decidir la banda, el monto ni la tasa (solo auditoria de equidad).
+# date_of_birth es la unica excepcion explicita de la politica 0.4: SOLO para el tope de plazo por edad al vencimiento
+# (los creditos deben terminar antes de los 75 anos, requisito usual del seguro de vida). El backend no la lee: gold ya
+# entrega max_term_* recortados y el agente nunca ve la fecha de nacimiento.
+protected_attributes: [gender, marital_status, education_level, detected_accent, date_of_birth]
+age_used_only_for: term_cap_at_maturity
+
+# Documentos para avanzar con una solicitud (lista SINTETICA del equipo). Lo que el banco ya tiene del cliente no se vuelve a
+# pedir. El chat no recibe archivos: el cliente confirma que cuenta con ellos y un asesor los verifica.
+required_documents:
+  personal_loan: [id_copy, address_proof, income_proof]
+  mortgage: [id_copy, address_proof, income_proof, property_deed, appraisal]
+  credit_card: [id_copy, address_proof, income_proof]
+  # Si la oferta depende de un ingreso declarado en el chat (no verificado, flag F03) se exige ademas:
+  if_income_declared: [bank_statements_3m]
+  # Si se sumo el ingreso de otra persona del hogar: sus documentos tambien (politica 0.4, seccion 6).
+  if_household_income: [household_id_copy, household_income_proof]

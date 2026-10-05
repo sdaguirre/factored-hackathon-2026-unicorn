@@ -4,6 +4,10 @@ TODO ES INVENTADO POR EL EQUIPO con una semilla fija: no se deriva de ningun dat
 clone el repositorio pueda ejecutar el backend, las pruebas y el CI sin acceso al bucket. Tiene la misma forma que el
 snapshot derivado del dataset (ver scripts/build_snapshot.py) y cubre cada escenario de la politica.
 
+credit_profile.parquet tiene las columnas de gold customer_credit_profile (politica 0.4, USD). Aqui las calcula el equipo con
+las mismas reglas (bandas, ajustes, filtros R01-R08, offer_mode) a partir de los datos inventados; en el snapshot vienen del
+export de gold.
+
 Uso:  python scripts/make_fixture.py
 """
 from __future__ import annotations
@@ -59,7 +63,11 @@ def month_start(d: date) -> date:
 OCCUPATIONS = ["Accountant", "Administrative", "Artist", "Consultant", "Director", "Doctor", "Driver", "Employee", "Engineer",
                "Entrepreneur", "Homemaker", "Independent Professional", "Lawyer", "Manager", "Merchant", "Retired",
                "Salesperson", "Student", "Teacher", "Technician"]
-NO_DATA_CUSTOMER = "FXC-010"      # el cliente al que le faltan datos para el reto de seguridad (escenario I), a proposito
+NO_DATA_CUSTOMER = "FXC-010"
+# Meses hasta los 75 anos (tope de plazo por edad, politica 0.4). Solo este cliente: su banda B permite hipotecas a 360 meses,
+# pero la edad las limita a 200 (15 anos si, 20 no). Al resto no se le fija fecha de nacimiento: sin tope, como en gold.
+AGE_CAP_MONTHS = {"FXC-012": 200}
+FX_PER_USD = {"MXN": 17.30, "COP": 4000.0, "ARS": 350.0}     # tasas inventadas, las mismas de fx_rates.parquet      # el cliente al que le faltan datos para el reto de seguridad (escenario I), a proposito
 
 
 def add_security_question_data(customers: list[dict], products: list[dict]) -> None:
@@ -112,6 +120,81 @@ def make_case_context() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def make_credit_profiles(customers: list[dict], products: list[dict], spec: list[tuple], cases: pd.DataFrame) -> pd.DataFrame:
+    """Filas de gold customer_credit_profile para los clientes inventados (misma logica que gold/10_customer_credit_profile.sql).
+
+    Deterministico y sin azar: no altera los demas datos del fixture."""
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from app.policy.engine import load_policy
+
+    policy = load_policy()
+    prm = policy.params
+    max_dti, min_income = float(prm["max_debt_to_income"]), float(prm["min_income_usd"])
+    complaints = cases[(cases.case_source == "complaint") & cases.status.isin(["Open", "In Process", "Escalated"])]
+    rows = []
+    for c, (_country, _consent, score, income, debt_ratio, dpd, _tx) in zip(customers, spec):
+        cid, ccy = c["customer_id"], CCY[c["country"]]
+        fx = round(1 / FX_PER_USD[ccy], 6)
+        mine = [p for p in products if p["customer_id"] == cid and p["product_status"] == "Active"]
+        band = next((b for b in policy.bands if score is not None and score >= b["min_credit_score"]), None)
+        income_usd = round(income * fx, 2) if income else None
+        installments = round(income * debt_ratio * fx, 2) if income else 0.0
+        reg = datetime.fromisoformat(c["registration_date"]).date()
+        tenure = (AS_OF.year - reg.year) * 12 + AS_OF.month - reg.month - (AS_OF.day < reg.day)
+        comp = complaints[complaints.customer_id == cid]
+        crit = int((comp.priority == "Critical").sum())
+        age_cap = AGE_CAP_MONTHS.get(cid)
+        seg_adj = policy.segments.get(c["segment"], 0.0)
+        band_adj = band["rate_adjustment_pp"] if band else None
+        max_total = round(max_dti * income_usd, 2) if income_usd is not None else None
+        available = round(max_total - installments, 2) if max_total is not None else None
+        codes = [code for code, hit in (
+            ("R01_INACTIVE_CUSTOMER", c["customer_status"] != "Active"),
+            ("R02_SHORT_TENURE", tenure < int(prm["min_tenure_months"])),
+            ("R03_DELINQUENCY", dpd > int(prm["max_days_past_due"])),
+            ("R05_INCOME_MISSING", income_usd is None),
+            ("R05_INCOME_BELOW_MIN", income_usd is not None and income_usd < min_income),
+            ("R06_SCORE_MISSING", band is None),
+            ("R06_SCORE_BELOW_MIN", band is not None and not band["offer_allowed"]),
+            ("R08_NO_CAPACITY", available is not None and available <= 0)) if hit]
+        eligible = not codes
+        mode = "none" if not eligible else ("proactive" if c["accepts_marketing"] and crit == 0 else "on_customer_interest")
+        types = [p["product_type"] for p in mine]
+
+        def term(key: str) -> int:
+            t = band[key] if band else 0
+            return min(t, age_cap) if age_cap is not None else t
+
+        rows.append({
+            "customer_id": cid, "country": c["country"], "local_currency": ccy, "segment": c["segment"],
+            "customer_status": c["customer_status"], "registration_date": reg, "tenure_months": tenure,
+            "accepts_marketing": c["accepts_marketing"], "credit_score": float(score) if score is not None else None,
+            "risk_band": band["band"] if band else None, "declared_income_local": float(income) if income else None,
+            "declared_income_usd": income_usd, "avg_monthly_deposits_usd_6m": None, "deposit_months_6m": 0,
+            "income_used_usd": income_usd, "income_source": "declared_profile" if income_usd is not None else "missing",
+            "active_products": len(mine), "active_credit_products": types.count("Tarjeta Crédito"),
+            "active_credit_cards": types.count("Tarjeta Crédito"), "active_personal_loans": 0, "active_mortgages": 0,
+            "card_limit_usd": None, "card_balance_usd": None, "card_utilization": None,
+            "current_installments_usd": installments,
+            "current_debt_to_income": round(installments / income_usd, 4) if income_usd else None,
+            "max_debt_to_income": max_dti, "max_total_installment_usd": max_total, "available_installment_usd": available,
+            "max_days_past_due": dpd, "has_blocked_or_suspended_product": False, "confirmed_fraud_tx_recent": 0,
+            "open_complaints": len(comp), "open_priority_complaints": int(comp.priority.isin(["High", "Critical"]).sum()),
+            "open_critical_complaints": crit, "band_rate_adjustment_pp": band_adj, "segment_rate_adjustment_pp": seg_adj,
+            "max_term_personal_loan_months": term("max_term_personal_loan_months"),
+            "max_term_mortgage_months": term("max_term_mortgage_months"), "max_term_by_age_months": age_cap,
+            "total_rate_adjustment_pp": (band_adj or 0.0) + seg_adj, "reason_codes": codes, "is_eligible": eligible,
+            "offer_mode": mode,
+            "not_proactive_reason": None if mode != "on_customer_interest" else (
+                "no_marketing_consent" if not c["accepts_marketing"] else "open_critical_complaint"),
+            "can_become_eligible_with_declared_income": income_usd is None, "requires_advisor_review": False,
+            "fx_to_usd": fx, "fx_date": AS_OF, "as_of_date": AS_OF, "policy_version": policy.version,
+        })
+    return pd.DataFrame(rows)
+
+
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     branches = []
@@ -152,10 +235,6 @@ def main() -> None:
             "customer_id": cid, "document_type": DOC_TYPE[country], "document_number": doc,
             "first_name": rng.choice(NAMES), "country": country, "segment": rng.choice(["Basic", "Plus", "Premium"]),
             "customer_status": "Active", "accepts_marketing": consent,
-            "credit_score": float(score) if score is not None else np.nan,
-            "monthly_income": float(income) if income is not None else np.nan,
-            "existing_monthly_debt": float(income * debt_ratio) if income else 0.0,
-            "max_days_past_due": dpd, "n_active_products": n_prod, "income_ccy": ccy,
         })
 
         # Correo (dominio reservado example.com) y documentos que el banco ya tiene. El primer cliente tiene todos
@@ -192,7 +271,7 @@ def main() -> None:
     pd.DataFrame(branches).to_parquet(OUT / "branches.parquet", index=False)
     pd.DataFrame(txs).to_parquet(OUT / "transactions.parquet", index=False)
     # Tasas de referencia INVENTADAS por el equipo (la forma del dataset: una fila por par de monedas y fecha de corte).
-    usd = {"MXN": 17.30, "COP": 4000.0, "ARS": 350.0}
+    usd = FX_PER_USD
     fx = []
     for a in ["USD", "MXN", "COP", "ARS"]:
         for b in ["USD", "MXN", "COP", "ARS"]:
@@ -202,6 +281,10 @@ def main() -> None:
     pd.DataFrame(fx).to_parquet(OUT / "fx_rates.parquet", index=False)
     cases = make_case_context()
     cases.to_parquet(OUT / "case_context.parquet", index=False)
+    credit = make_credit_profiles(customers, products, SPEC, cases)
+    credit.to_parquet(OUT / "credit_profile.parquet", index=False)
+    print(f"fixture: perfil de credito (politica {credit.policy_version.iloc[0]}): elegibles={int(credit.is_eligible.sum())} "
+          f"proactivos={int((credit.offer_mode == 'proactive').sum())} de {len(credit)}")
     print(f"fixture: casos abiertos={len(cases)} en {cases.customer_id.nunique()} clientes")
     print(f"fixture: clientes={len(customers)} productos={len(products)} sucursales={len(branches)} movimientos={len(txs)} -> {OUT}")
 

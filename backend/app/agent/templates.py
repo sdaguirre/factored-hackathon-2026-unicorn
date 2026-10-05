@@ -16,14 +16,10 @@ PRODUCT_NAME = {
 
 REASON_TEXT = {
     "es": {"CUSTOMER_NOT_ACTIVE": "su cuenta no está activa", "DELINQUENT_REVIEW": "tiene pagos atrasados",
-           "BORDERLINE_DTI": "su capacidad de pago está justo en el límite",
-           "INCOME_UPLIFT_REVIEW": "el aumento de ingreso informado necesita verificación",
            "MISSING_DATA": "faltan datos para evaluarlo", "USER_REQUEST": "usted lo solicitó",
            "UNSUPPORTED_PRODUCT": "ese producto lo atiende un asesor", "UNCLEAR": "no logré entender su consulta",
            "DOCS_INCOMPLETE": "falta documentación por completar", "OTHER_TOPIC": "ese tema lo atiende un asesor"},
     "pt": {"CUSTOMER_NOT_ACTIVE": "sua conta não está ativa", "DELINQUENT_REVIEW": "há pagamentos em atraso",
-           "BORDERLINE_DTI": "sua capacidade de pagamento está no limite",
-           "INCOME_UPLIFT_REVIEW": "o aumento de renda informado precisa de verificação",
            "MISSING_DATA": "faltam dados para a análise", "USER_REQUEST": "você solicitou",
            "UNSUPPORTED_PRODUCT": "esse produto é atendido por um consultor", "UNCLEAR": "não consegui entender a consulta",
            "DOCS_INCOMPLETE": "falta documentação a completar", "OTHER_TOPIC": "esse assunto é atendido por um consultor"},
@@ -144,9 +140,17 @@ T: dict[str, dict[str, str | list[str]]] = {
         "es": "{fx}Buenas noticias: con los datos que tenemos, un {product} de {amount} a {months} meses es viable. La cuota sería de unos {payment} al mes, con una tasa anual de {rate}, y le dejaría un endeudamiento de {dti} de su ingreso (el máximo que manejamos es {max_dti}). Tenga en cuenta que es una simulación: la aprobación final depende de la verificación del banco.",
         "pt": "{fx}Boas notícias: com os dados que temos, um {product} de {amount} em {months} meses é viável. A parcela seria de cerca de {payment} por mês, com taxa anual de {rate}, e deixaria seu endividamento em {dti} da renda (o máximo que trabalhamos é {max_dti}). Lembre que é uma simulação: a aprovação final depende da verificação do banco.",
     },
+    "eligible_card": {
+        "es": "{fx}Buenas noticias: con los datos que tenemos, puede acceder a una {product} con un cupo de {amount} y una tasa anual de {rate}. Si usara todo el cupo, la cuota para pagarlo en {months} meses sería de unos {payment} al mes, y su endeudamiento quedaría en {dti} de su ingreso (el máximo que manejamos es {max_dti}). Es una simulación: la aprobación final depende de la verificación del banco.",
+        "pt": "{fx}Boas notícias: com os dados que temos, você pode ter um {product} com limite de {amount} e taxa anual de {rate}. Se usasse todo o limite, a parcela para pagar em {months} meses seria de cerca de {payment} por mês, e seu endividamento ficaria em {dti} da renda (o máximo que trabalhamos é {max_dti}). É uma simulação: a aprovação final depende da verificação do banco.",
+    },
+    "eligible_card_provisional": {
+        "es": "{fx}Con los datos que usted me indicó, puede acceder a una {product} con un cupo de {amount} y una tasa anual de {rate}, sujeta a verificar esos datos. Si usara todo el cupo, la cuota para pagarlo en {months} meses sería de unos {payment} al mes (endeudamiento de {dti}, bajo el máximo de {max_dti}). Es una simulación.",
+        "pt": "{fx}Com os dados que você informou, você pode ter um {product} com limite de {amount} e taxa anual de {rate}, sujeito à verificação desses dados. Se usasse todo o limite, a parcela para pagar em {months} meses seria de cerca de {payment} por mês (endividamento de {dti}, abaixo do máximo de {max_dti}). É uma simulação.",
+    },
     "eligible_provisional": {
-        "es": "{fx}Con el ingreso que usted me indicó, un {product} de {amount} a {months} meses es viable, aunque queda sujeto a la verificación de sus ingresos. La cuota sería de unos {payment} al mes, con una tasa anual de {rate} (endeudamiento de {dti}, bajo el máximo de {max_dti}). Es una simulación.",
-        "pt": "{fx}Com a renda que você informou, um {product} de {amount} em {months} meses é viável, mas fica sujeito à verificação da sua renda. A parcela seria de cerca de {payment} por mês, com taxa anual de {rate} (endividamento de {dti}, abaixo do máximo de {max_dti}). É uma simulação.",
+        "es": "{fx}Con los datos que usted me indicó, un {product} de {amount} a {months} meses es viable, aunque queda sujeto a verificar esos datos. La cuota sería de unos {payment} al mes, con una tasa anual de {rate} (endeudamiento de {dti}, bajo el máximo de {max_dti}). Es una simulación.",
+        "pt": "{fx}Com os dados que você informou, um {product} de {amount} em {months} meses é viável, mas fica sujeito à verificação desses dados. A parcela seria de cerca de {payment} por mês, com taxa anual de {rate} (endividamento de {dti}, abaixo do máximo de {max_dti}). É uma simulação.",
     },
     "declined_dti": {
         "es": "{fx}Con esa cuota usaría {dti} de su ingreso, y el máximo que manejamos es {max_dti}. Con su situación actual, lo más alto que podríamos simular a {months} meses es {max_amount}. Si sus ingresos cambiaron, cuénteme y lo recalculo.",
@@ -168,25 +172,92 @@ T: dict[str, dict[str, str | list[str]]] = {
         "es": "No tengo información suficiente para evaluarlo yo solo; un asesor sí puede ayudarle. ¿Lo conecto?",
         "pt": "Não tenho informações suficientes para avaliar sozinho; um consultor pode ajudar. Conecto você?",
     },
-    "unsupported_product": {
-        "es": "Las tarjetas de crédito las atiende un asesor. ¿Quiere que lo conecte?",
-        "pt": "Os cartões de crédito são atendidos por um consultor. Quer que eu conecte?",
+    # Sin monto: se presenta primero lo mas alto (la opcion destacada de gold) y se pregunta cuanto necesita.
+    "offer_featured": {
+        "es": "{fx}Para su {product}, lo más alto que puedo ofrecerle hoy es {max_amount} a {months} meses, con una tasa anual de {rate} y una cuota de unos {payment} al mes. ¿Qué monto necesita? Si le sirve ese, dígame que sí. Es una simulación.",
+        "pt": "{fx}Para o seu {product}, o máximo que posso oferecer hoje é {max_amount} em {months} meses, com taxa anual de {rate} e parcela de cerca de {payment} por mês. Qual valor você precisa? Se esse servir, é só dizer sim. É uma simulação.",
+    },
+    "offer_featured_card": {
+        "es": "{fx}Lo más alto que puedo ofrecerle hoy es una {product} con un cupo de hasta {max_amount} y una tasa anual de {rate}. ¿Qué cupo necesita? Si le sirve ese, dígame que sí. Es una simulación.",
+        "pt": "{fx}O máximo que posso oferecer hoje é um {product} com limite de até {max_amount} e taxa anual de {rate}. Qual limite você precisa? Se esse servir, é só dizer sim. É uma simulação.",
     },
     "offers": {
-        "es": "Estas son las tasas anuales de referencia para su perfil: {lines}. {capacity}",
-        "pt": "Estas são as taxas anuais de referência para o seu perfil: {lines}. {capacity}",
+        "es": "Con los datos del banco, esto es lo más alto que puedo ofrecerle hoy: {lines}. Es una simulación. ¿Cuál le interesa y por qué monto?",
+        "pt": "Com os dados do banco, isto é o máximo que posso oferecer hoje: {lines}. É uma simulação. Qual interessa e de que valor?",
     },
-    "offers_capacity": {
-        "es": "Con su situación actual, un préstamo personal a {months} meses podría llegar hasta unos {max_amount}. Es una simulación.",
-        "pt": "Na sua situação atual, um empréstimo pessoal em {months} meses poderia chegar a cerca de {max_amount}. É uma simulação.",
+    "offer_line": {
+        "es": "{product} de hasta {max_amount} a {months} meses (tasa anual {rate})",
+        "pt": "{product} de até {max_amount} em {months} meses (taxa anual {rate})",
     },
-    "offers_no_capacity": {
-        "es": "Para estimar un monto máximo necesito saber su ingreso mensual, ¿me lo comparte?",
-        "pt": "Para estimar um valor máximo preciso saber sua renda mensal, pode me informar?",
+    "offer_line_card": {
+        "es": "{product} con cupo de hasta {max_amount} (tasa anual {rate})",
+        "pt": "{product} com limite de até {max_amount} (taxa anual {rate})",
     },
-    "income_review": {
-        "es": "El ingreso que me indica es bastante mayor al que tenemos registrado, así que debe verificarlo un asesor. ¿Lo conecto?",
-        "pt": "A renda que você informa é bem maior do que a registrada, então precisa ser verificada por um consultor. Conecto você?",
+    "offers_none": {
+        "es": "Con su capacidad de pago actual no alcanzo el monto mínimo de ninguno de nuestros créditos. Si sus ingresos cambiaron, cuénteme y lo recalculo.",
+        "pt": "Com sua capacidade de pagamento atual não chego ao valor mínimo de nenhum dos nossos créditos. Se sua renda mudou, me conte e eu recalculo.",
+    },
+    # Plazos: la banda de riesgo y, desde la politica 0.4, la edad al vencimiento limitan el plazo maximo.
+    "term_not_offered": {
+        "es": "{fx}Para el {product} manejo plazos de {terms} meses. ¿Cuál prefiere?",
+        "pt": "{fx}Para o {product} trabalho com prazos de {terms} meses. Qual prefere?",
+    },
+    "term_band": {
+        "es": "{fx}Para su perfil, ese plazo no está disponible. Puedo calcular el {product} a {terms} meses. ¿Cuál prefiere?",
+        "pt": "{fx}Para o seu perfil, esse prazo não está disponível. Posso calcular o {product} em {terms} meses. Qual prefere?",
+    },
+    "term_age": {
+        "es": "{fx}Con ese plazo el crédito terminaría después de los {max_age} años, que es la edad máxima al vencimiento que permite la política. Puedo calcular el {product} a {terms} meses. ¿Cuál prefiere?",
+        "pt": "{fx}Com esse prazo o crédito terminaria depois dos {max_age} anos, que é a idade máxima no vencimento permitida pela política. Posso calcular o {product} em {terms} meses. Qual prefere?",
+    },
+    "product_age": {
+        "es": "{fx}La política pide que el crédito termine antes de los {max_age} años, y con los plazos del {product} no es posible hoy. Puedo consultarle otro producto o conectarlo con un asesor.",
+        "pt": "{fx}A política pede que o crédito termine antes dos {max_age} anos, e com os prazos do {product} isso não é possível hoje. Posso consultar outro produto ou conectar você a um consultor.",
+    },
+    "term_no_capacity": {
+        "es": "{fx}A ese plazo, su capacidad de pago actual no alcanza el monto mínimo del {product}. Puedo calcularlo a {terms} meses. ¿Cuál prefiere?",
+        "pt": "{fx}Nesse prazo, sua capacidade de pagamento atual não chega ao valor mínimo do {product}. Posso calcular em {terms} meses. Qual prefere?",
+    },
+    "option_no_capacity": {
+        "es": "{fx}Con su capacidad de pago actual no alcanzo el monto mínimo del {product}. Si sus ingresos cambiaron, cuénteme y lo recalculo.",
+        "pt": "{fx}Com sua capacidade de pagamento atual não chego ao valor mínimo do {product}. Se sua renda mudou, me conte e eu recalculo.",
+    },
+    "above_max": {
+        "es": "{fx}Lo más alto que puedo ofrecerle en un {product} a {months} meses es {max_amount}. ¿Qué monto necesita? Si le sirve ese, dígame que sí.",
+        "pt": "{fx}O máximo que posso oferecer em um {product} em {months} meses é {max_amount}. Qual valor você precisa? Se esse servir, é só dizer sim.",
+    },
+    "below_min": {
+        "es": "{fx}El monto mínimo para un {product} es {min_amount}. ¿Qué monto necesita?",
+        "pt": "{fx}O valor mínimo para um {product} é {min_amount}. Qual valor você precisa?",
+    },
+    "income_below_min": {
+        "es": "Con el ingreso que tenemos registrado no alcanzo el mínimo que pide la política para un crédito. Si sus ingresos cambiaron, cuénteme cuánto gana al mes ({ccy}) y lo recalculo.",
+        "pt": "Com a renda que temos registrada não chego ao mínimo que a política pede para um crédito. Se sua renda mudou, me conte quanto ganha por mês ({ccy}) e eu recalculo.",
+    },
+    # Ingreso del hogar (politica 0.4): se pregunta a TODOS igual, una vez, y nunca se deduce del estado civil.
+    "ask_household": {
+        "es": "¿Hay alguien más en su hogar que aporte ingresos y pueda sumarse al crédito?",
+        "pt": "Há mais alguém na sua casa que contribua com renda e possa participar do crédito?",
+    },
+    "ask_household_income": {
+        "es": "¿Cuánto gana esa persona al mes, aproximadamente ({ccy})?",
+        "pt": "Quanto essa pessoa ganha por mês, aproximadamente ({ccy})?",
+    },
+    "ask_household_debt": {
+        "es": "¿Y cuánto paga esa persona en cuotas de créditos al mes? Si no paga ninguna, dígame 0; si no lo sabe, no se preocupe: un asesor lo completa.",
+        "pt": "E quanto essa pessoa paga em parcelas de crédito por mês? Se não paga nenhuma, me diga 0; se não souber, não tem problema: um consultor completa.",
+    },
+    "household_unknown": {
+        "es": "Sin las cuotas de esa persona todavía no puedo sumar su ingreso; lo dejo anotado para que un asesor lo complete.",
+        "pt": "Sem as parcelas dessa pessoa ainda não posso somar a renda dela; deixo anotado para um consultor completar.",
+    },
+    "household_none": {
+        "es": "Entendido.",
+        "pt": "Entendido.",
+    },
+    "household_none_open": {
+        "es": "Entendido. Si sus ingresos cambiaron o quiere consultar otro monto o plazo, dígame.",
+        "pt": "Entendido. Se sua renda mudou ou quer consultar outro valor ou prazo, me diga.",
     },
     # ---------------------------------------------------------------- derivacion a un asesor
     "handoff_created": {
@@ -212,9 +283,17 @@ T: dict[str, dict[str, str | list[str]]] = {
         "es": "Por cierto, {first_name}: según los datos del banco ya tiene una preaprobación indicativa de un {product} de hasta {max_amount} a {months} meses, con una tasa anual de {rate}. Es una simulación, sujeta a verificación y aprobación final. ¿Le interesa que le cuente más?",
         "pt": "A propósito, {first_name}: com base nos dados do banco você já tem uma pré-aprovação indicativa de um {product} de até {max_amount} em {months} meses, com taxa anual de {rate}. É uma simulação, sujeita a verificação e aprovação final. Quer que eu conte mais?",
     },
+    "offer_proactive_card": {
+        "es": "Por cierto, {first_name}: según los datos del banco ya tiene una preaprobación indicativa de una {product} con un cupo de hasta {max_amount} y una tasa anual de {rate}. Es una simulación, sujeta a verificación y aprobación final. ¿Le interesa que le cuente más?",
+        "pt": "A propósito, {first_name}: com base nos dados do banco você já tem uma pré-aprovação indicativa de um {product} com limite de até {max_amount} e taxa anual de {rate}. É uma simulação, sujeita a verificação e aprovação final. Quer que eu conte mais?",
+    },
     "offer_accepted": {
-        "es": "Perfecto. ¿Qué monto necesita? Puede decirme también el plazo en meses (si no, uso {months}).",
-        "pt": "Perfeito. Qual valor você precisa? Pode me dizer também o prazo em meses (se não, uso {months}).",
+        "es": "Perfecto. ¿Qué monto necesita? Puede ser hasta {max_amount}; dígame también el plazo en meses si lo prefiere distinto (si no, uso {months}).",
+        "pt": "Perfeito. Qual valor você precisa? Pode ser até {max_amount}; diga também o prazo em meses se preferir outro (se não, uso {months}).",
+    },
+    "offer_accepted_card": {
+        "es": "Perfecto. ¿Qué cupo necesita? Puede ser hasta {max_amount}.",
+        "pt": "Perfeito. De qual limite você precisa? Pode ser até {max_amount}.",
     },
     "offer_declined": {
         "es": "Entendido, no se lo volveré a proponer en esta conversación. ¿Puedo ayudarle en algo más?",
@@ -280,16 +359,20 @@ T: dict[str, dict[str, str | list[str]]] = {
 DOC_NAME = {
     "es": {"id_copy": "su copia del documento de identidad", "address_proof": "su comprobante de domicilio",
            "income_proof": "su comprobante de ingresos", "bank_statements_3m": "sus estados de cuenta de los últimos 3 meses",
-           "property_deed": "la escritura de la propiedad", "appraisal": "el avalúo de la propiedad"},
+           "property_deed": "la escritura de la propiedad", "appraisal": "el avalúo de la propiedad",
+           "household_id_copy": "el documento de identidad de la persona de su hogar que suma ingresos",
+           "household_income_proof": "el comprobante de ingresos de esa persona"},
     "pt": {"id_copy": "sua cópia do documento de identidade", "address_proof": "seu comprovante de endereço",
            "income_proof": "seu comprovante de renda", "bank_statements_3m": "seus extratos bancários dos últimos 3 meses",
-           "property_deed": "a escritura do imóvel", "appraisal": "a avaliação do imóvel"},
+           "property_deed": "a escritura do imóvel", "appraisal": "a avaliação do imóvel",
+           "household_id_copy": "o documento de identidade da pessoa da sua casa que soma renda",
+           "household_income_proof": "o comprovante de renda dessa pessoa"},
 }
 SUMMARY_TEXT = {
-    "es": {"eligible": "preliminarmente elegible", "provisional": "preliminarmente elegible, sujeta a verificación de ingresos",
+    "es": {"eligible": "preliminarmente elegible", "provisional": "preliminarmente elegible, sujeta a verificar los datos que usted declaró",
            "docs_complete": "completa; la revisará un asesor", "docs_pending": "pendiente: {missing}", "docs_not_started": "aún sin iniciar",
            "ticket_line": "\n• Seguimiento: {ticket}"},
-    "pt": {"eligible": "preliminarmente elegível", "provisional": "preliminarmente elegível, sujeita à verificação de renda",
+    "pt": {"eligible": "preliminarmente elegível", "provisional": "preliminarmente elegível, sujeita à verificação dos dados que você informou",
            "docs_complete": "completa; um consultor fará a revisão", "docs_pending": "pendente: {missing}", "docs_not_started": "ainda não iniciada",
            "ticket_line": "\n• Acompanhamento: {ticket}"},
 }
@@ -318,6 +401,18 @@ SUGGESTIONS = {
     "start_case": {"es": ["Sí, cuénteme", "Consultar mis productos", "Hablar con un asesor"],
                    "pt": ["Sim, conte", "Consultar meus produtos", "Falar com um consultor"]},
 }
+
+
+TIER_NAME = {"Classic": "Clásica", "Gold": "Gold", "Platinum": "Platinum", "Black": "Black"}
+
+
+def product_label(product: str, tier: str | None, lang: str) -> str:
+    """'préstamo personal' o, para tarjetas, 'tarjeta de crédito Gold'."""
+    name = PRODUCT_NAME[lang][product]
+    if product == "credit_card" and tier:
+        tier_name = TIER_NAME.get(tier, tier) if lang == "es" else tier
+        return f"{name} {tier_name}"
+    return name
 
 
 def render(kind: str, lang: str, fmt: dict[str, str], variant: int = 0) -> str:

@@ -23,7 +23,7 @@ Cliente ─► Interfaz web ─► API (sesión de prueba, trace_id)
           ┌───────────────┼──────────────────────────┐
           ▼               ▼                          ▼
    LLM: intención +   Herramientas (permisos      Motor de política
-   idioma + tono      por cliente de la sesión)   (credit_policy.yaml)
+   idioma + tono      por cliente de la sesión)   (política 0.4 = gold)
           │               │                          │
           └───────► hechos verificados ◄─────────────┘
                               │
@@ -94,9 +94,10 @@ reconstruir el snapshot derivado del dataset real se necesita acceso al bucket d
 - **Falta una evaluación de punta a punta** con un conjunto reservado de conversaciones completas y las métricas del
   enunciado (resolución automática segura, contención, calidad del escalamiento, resultados inseguros con
   denominadores, latencia y costo por resolución, por idioma). Hoy hay pruebas unitarias y la evaluación del NLU.
-- The backend still evaluates with the preliminary policy (`backend/policy/credit_policy.yaml`). The reference version is
-  0.4 ([`docs/CREDIT_RULES.md`](docs/CREDIT_RULES.md), [`data/reference/`](data/reference/)), already computed in
-  Databricks; aligning the engine is in progress ([`docs/ENGINE_ALIGNMENT.md`](docs/ENGINE_ALIGNMENT.md)).
+- The backend evaluates with policy 0.4 ([`docs/CREDIT_RULES.md`](docs/CREDIT_RULES.md), [`data/reference/`](data/reference/)),
+  the same version computed in Databricks gold: 0 mismatches on all 1.8M offer options
+  ([`docs/ENGINE_ALIGNMENT.md`](docs/ENGINE_ALIGNMENT.md)). Accepted offers are written locally and synced to
+  `credit_offers` with a script; the demo does not query Databricks live.
 - There is no learned risk model: the band comes from `credit_score`. In this data delinquency is unrelated to the score,
   so a model has little signal; it still has to be evaluated against that baseline.
 - La verificación por preguntas de seguridad tiene 1/64 de probabilidad de acierto al azar por intento; mitigada con

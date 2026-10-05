@@ -15,12 +15,12 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from app.agent.tools import ToolContext, evaluate_credit, offer_rates  # noqa: E402
+from app.agent.tools import ToolContext, get_offers, recalculate_offer, to_local  # noqa: E402
 from app.auth import kba  # noqa: E402
 from app.config import Settings  # noqa: E402
 from app.core.fmt import fmt_date, fmt_money, fmt_month_year  # noqa: E402
 from app.data.repository import SnapshotRepository  # noqa: E402
-from app.policy import credit_engine as ce  # noqa: E402
+from app.policy import engine as eng  # noqa: E402
 
 import argparse
 
@@ -30,7 +30,7 @@ ap.add_argument("--out", default="DATOS_DE_PRUEBA.md")
 args = ap.parse_args()
 S = Settings(_env_file=None, **({"data_dir": Path(args.data_dir)} if args.data_dir else {}))
 repo = SnapshotRepository(S.data_dir)
-policy = ce.load_policy(S.policy_path)
+policy = eng.load_policy()
 AS_OF = S.as_of_date
 PROD = {"Cuenta Ahorro": "cuenta de ahorro", "Tarjeta Crédito": "tarjeta de crédito", "Cuenta Corriente": "cuenta corriente",
         "Tarjeta Débito": "tarjeta de débito", "Préstamo Personal": "préstamo personal",
@@ -41,18 +41,20 @@ rows = []
 for r in repo._customers.itertuples():
     cid = r.customer_id
     prof = repo.credit_profile(cid)
-    ctx = ToolContext(cid, repo, policy)
-    info = offer_rates(ctx)
-    probe = info["probe"].decision
-    pre = probe.outcome == ce.ELIGIBLE and bool(info["rates"]) and (probe.max_amount or 0) > 0
-    income = prof["monthly_income"]
+    offers = get_offers(ToolContext(cid, repo, policy), record=False)
+    income = to_local(prof, prof.get("income_used_usd"))
     ok_kba = all(kba.build_challenge(repo, repo.find_by_document(str(r.document_number)), n=3, lang="es", as_of=AS_OF)
                  for _ in range(5))
-    rows.append(dict(cid=cid, doc=str(r.document_number), name=r.first_name, country=r.country, ccy=prof["income_ccy"],
-                     consent=prof["accepts_marketing"], income=income, score=prof["credit_score"], dpd=prof["max_days_past_due"],
-                     band=probe.band, pre=pre, max_amount=probe.max_amount, ok_kba=ok_kba, rates=info["rates"],
-                     dti_now=(prof["existing_monthly_debt"] / income) if income else None))
+    band_mg = eng.band_max_term(policy, prof.get("risk_band"), "MG")
+    rows.append(dict(cid=cid, doc=str(r.document_number), name=r.first_name, country=r.country, ccy=prof["local_currency"],
+                     consent=prof["accepts_marketing"], income=income, score=prof.get("credit_score"),
+                     dpd=prof.get("max_days_past_due") or 0, band=prof.get("risk_band"), mode=prof["offer_mode"],
+                     codes=list(prof.get("reason_codes") or []), pre=bool(prof["is_eligible"]) and bool(offers.ordered),
+                     featured={o["product_code"]: o for o in offers.ordered}, ok_kba=ok_kba,
+                     age_capped=bool(prof["is_eligible"]) and (prof.get("max_term_mortgage_months") or 0) < band_mg,
+                     complaints=prof.get("open_complaints") or 0))
 df = pd.DataFrame(rows)
+only = lambda code: df.codes.map(lambda c: c == [code])   # noqa: E731
 
 
 def pick(mask, n=1, prefer_countries=True):
@@ -70,14 +72,18 @@ def pick(mask, n=1, prefer_countries=True):
 
 
 SCENARIOS = [
-    ("A", "Consiente marketing y está preaprobado: recibe la oferta proactiva al cerrar", pick(df.consent & df.pre, 3)),
-    ("B", "NO consiente marketing pero está preaprobado: puede pedir crédito, nunca recibe oferta proactiva", pick(~df.consent & df.pre, 2)),
-    ("C", "Sin ingreso registrado: el asistente pide que lo declare (queda provisional)", pick(df.income.isna() & df.score.notna() & (df.dpd <= 30), 1)),
-    ("D", "Sin score registrado: no se puede evaluar solo, ofrece derivar", pick(df.score.isna() & df.income.notna(), 1)),
-    ("E", "Mora de 31 a 90 días: va a revisión de un asesor", pick((df.dpd > 30) & (df.dpd <= 90) & df.income.notna() & df.score.notna(), 1)),
-    ("F", "Mora de más de 90 días: crédito rechazado", pick((df.dpd > 90) & df.income.notna() & df.score.notna(), 1)),
-    ("G", "Sin capacidad de endeudamiento (su deuda actual ya supera el 20% del ingreso)", pick(df.dti_now.notna() & (df.dti_now >= 0.2) & (df.dpd <= 30) & df.score.notna(), 1)),
-    ("H", "Score muy bajo (banda 1): crédito rechazado", pick((df.band == 1) & (df.dpd <= 30) & df.income.notna(), 1)),
+    ("A", "Oferta proactiva (gold: offer_mode = proactive): la recibe al cerrar, empezando por lo más alto",
+     pick((df["mode"] == "proactive") & df.pre & (df.complaints == 0), 3)),
+    ("B", "Elegible sin consentimiento de marketing (on_customer_interest): puede pedir crédito, nunca recibe oferta proactiva",
+     pick((df["mode"] == "on_customer_interest") & ~df.consent & df.pre, 2)),
+    ("C", "Plazo limitado por la edad al vencimiento (75 años, política 0.4): la hipoteca no llega al máximo de su banda",
+     pick(df.age_capped & df.pre, 1)),
+    ("D", "Sin ingreso registrado (R05): el asistente pide que lo declare y la oferta queda condicional (F03)",
+     pick(only("R05_INCOME_MISSING"), 1)),
+    ("E", "Sin score registrado (R06): no se puede evaluar solo, ofrece derivar", pick(only("R06_SCORE_MISSING"), 1)),
+    ("F", "Mora de más de 30 días (R03): crédito rechazado", pick(df.codes.map(lambda c: "R03_DELINQUENCY" in c), 1)),
+    ("G", "Sin capacidad de endeudamiento (R08): sus cuotas actuales ya llegan al 20% del ingreso", pick(only("R08_NO_CAPACITY"), 1)),
+    ("H", "Score bajo el mínimo (banda E, R06): crédito rechazado", pick(only("R06_SCORE_BELOW_MIN"), 1)),
 ]
 # Sin datos suficientes para 3 preguntas: AUTH_UNAVAILABLE
 unavail = df[~df.ok_kba]
@@ -113,20 +119,28 @@ def card(r) -> str:
 def phrases(r) -> list[str]:
     out = []
     inc = r["income"]
+    ctx = ToolContext(r["cid"], repo, policy)
     if r["pre"]:
-        out += ["«¿qué tasas tienen para mí?»", "«gracias, eso es todo» (debe llegar la oferta)" if r["consent"] else "«gracias, eso es todo» (NO debe llegar oferta)"]
-    if pd.notna(inc) and inc:
-        small, big = int(inc * 0.3), int(inc * 6)
-        res_s = evaluate_credit(ToolContext(r["cid"], repo, policy), "personal_loan", small, 24)
-        res_b = evaluate_credit(ToolContext(r["cid"], repo, policy), "personal_loan", big, 36)
-        out += [f"«quiero un préstamo de {small} a 24 meses» → {res_s.decision.outcome}",
-                f"«necesito un préstamo de {big}» → {res_b.decision.outcome}"]
-        out.append(f"«ahora gano {int(inc * 1.4)} al mes» (tras un rechazo por capacidad, recalcula como provisional)")
-        out += [f"«necesito un préstamo de 1000 dólares a 24 meses» → convierte a {r['ccy']} con la tasa de referencia y muestra los equivalentes",
-                "«sí» (a «¿Le gustaría que avancemos?») → pide solo los documentos que falten; con todo en orden deriva a un asesor",
+        out += ["«¿qué ofertas tengo?» → lo más alto de cada producto (préstamo, tarjeta por nivel, hipoteca)",
+                "«gracias, eso es todo» (debe llegar la oferta)" if r["mode"] == "proactive" else "«gracias, eso es todo» (NO debe llegar oferta)"]
+    pl = r["featured"].get("PL") if isinstance(r["featured"], dict) else None
+    if pl:
+        prof = repo.credit_profile(r["cid"])
+        half = int(to_local(prof, pl["offer_max_amount_usd"] * 0.5))
+        big = int(to_local(prof, pl["offer_max_amount_usd"] * 1.3))
+        q_big = recalculate_offer(ctx, "personal_loan", big, pl["term_months"], record=False)
+        out += ["«quiero un préstamo» → propone lo más alto y pregunta el monto; «sí» toma ese máximo",
+                f"«quiero un préstamo de {half} a {pl['term_months']} meses» → eligible; luego pregunta si alguien más del hogar aporta ingresos",
+                f"«necesito un préstamo de {big} a {pl['term_months']} meses» → {q_big.outcome} (pasa el 20% del ingreso)",
+                "«sí» / «mi pareja gana 20.000» → pide el ingreso y las cuotas de esa persona y recalcula (oferta condicional, F03)",
+                f"«necesito un préstamo de 8000 dólares a {pl['term_months']} meses» → convierte a {r['ccy']} con la tasa de referencia",
+                "«quiero una tarjeta de crédito» → el nivel más alto disponible (Clásica, Gold, Platinum o Black)",
+                "«sí» (a «¿Le gustaría que avancemos?») → registra la oferta aceptada y pide solo los documentos que falten",
                 "«gracias, eso es todo» → resumen de la propuesta y aviso del PDF por correo (simulado)"]
-    else:
-        out += ["«quiero un préstamo de 3000» → pide el ingreso; luego «gano 5000»"]
+    if r["age_capped"]:
+        out += ["«quiero una hipoteca a 30 años» → explica que terminaría después de los 75 años y ofrece los plazos posibles"]
+    if not r["pre"] and r["codes"] == ["R05_INCOME_MISSING"]:
+        out += ["«quiero un préstamo» → pide el ingreso; luego «gano ...» y «quiero un préstamo» de nuevo (condicional)"]
     out += ["«¿eres un robot?» → responde con la verdad: es el asistente virtual del banco, no una persona",
             "«no reconozco un cargo en mi cuenta» → pide confirmar la derivación; nunca ofrece crédito",
             "«quiero hablar con un asesor» → deriva y muestra el número de seguimiento"]
@@ -136,8 +150,11 @@ def phrases(r) -> list[str]:
 def header(r) -> str:
     inc = fmt_money(r["income"], r["ccy"], 0) if pd.notna(r["income"]) else "sin ingreso registrado"
     sc = int(r["score"]) if pd.notna(r["score"]) else "sin score"
-    return (f"**{r['name']}** · documento `{r['doc']}` · {r['country']} · moneda {r['ccy']} · ingreso {inc} · score {sc} · "
-            f"mora máx. {int(r['dpd'])} días · marketing: {'sí' if r['consent'] else 'no'}")
+    band = r["band"] if isinstance(r["band"], str) else "sin banda"
+    codes = ", ".join(r["codes"]) or "ninguno"
+    return (f"**{r['name']}** · documento `{r['doc']}` · {r['country']} · moneda {r['ccy']} · ingreso {inc} · score {sc} "
+            f"(banda {band}) · mora máx. {int(r['dpd'])} días · marketing: {'sí' if r['consent'] else 'no'} · "
+            f"gold: `{r['mode']}`, motivos {codes}")
 
 
 md = ["# Datos de prueba del asistente",
@@ -155,6 +172,11 @@ md = ["# Datos de prueba del asistente",
       "mismo país. Nunca se pregunta por montos ni fechas exactas.",
       "3. Pruebe las frases sugeridas de cada escenario. Para portugués, cambie el selector de idioma antes de empezar.",
       "",
+      "**Política de crédito 0.4** (`docs/CREDIT_RULES.md`), la misma que calcula gold: bandas A–E, tasa de la grilla por plazo "
+      "o nivel de tarjeta, plazo máximo por banda y por edad (el crédito termina antes de los 75 años), límite del 20% sin "
+      "margen. Sin monto, el asistente propone primero lo más alto. Tras un resultado pregunta a todos por igual si alguien más "
+      "del hogar aporta ingresos. Los montos se calculan en USD y se muestran en la moneda local del cliente.",
+      "",
       "**Flujos de crédito:** tras una evaluación favorable el asistente pregunta si quiere avanzar. Si dice que sí, pide solo los "
       "documentos que al cliente le **faltan** (los que el banco ya tiene figuran en cada ficha); el chat no recibe archivos: el "
       "cliente confirma que cuenta con ellos. Con todo en orden deriva a un asesor. Al terminar (despedida o botón «Terminar "
@@ -166,8 +188,8 @@ md = ["# Datos de prueba del asistente",
       "Tres intentos fallidos bloquean ese documento 15 minutos (también un documento inexistente, a propósito). "
       "Para desbloquear, reinicie el backend: `docker compose restart chat-backend`.",
       "",
-      "Los montos de los ejemplos están en la moneda del ingreso de cada cliente. Los resultados indicados (eligible, "
-      "declined…) son los de la política provisional con los datos de hoy.",
+      "Los montos de los ejemplos están en la moneda local de cada cliente. Los resultados indicados (eligible, "
+      "declined…) son los de la política 0.4 con los datos de hoy.",
       ""]
 for letter, title, custs in SCENARIOS:
     md += [f"## Escenario {letter}: {title}", ""]

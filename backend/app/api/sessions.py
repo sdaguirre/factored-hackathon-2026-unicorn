@@ -77,7 +77,7 @@ def verify(body: VerifyRequest, session: Session = Depends(require_session),
         session.state, session.challenge = AUTHENTICATED, None
         # Lo que le quedo pendiente al cliente, leido una vez al autenticar. Un fallo aqui no debe impedir la conversacion.
         try:
-            session.slots["context"] = get_customer_context(ToolContext(c.customer_id, state.repo, state.policy))
+            session.slots["context"] = get_customer_context(ToolContext(c.customer_id, state.repo, state.policy, state.offers))
         except Exception as exc:
             log(logger, "context_unavailable", error=type(exc).__name__)
             session.slots["context"] = build_context([], [])

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from app.agent.nlu import NLUResult
-from tests.conftest import customers_by_offer_profile, login
+from tests.conftest import customers_by_offer_profile, login, offer_amount
 
 
 class MisbehavingLLM:
@@ -47,11 +47,13 @@ def test_explicit_human_request_is_still_honored(client, state):
 
 
 def test_llm_cannot_rewrite_credit_decisions_or_offers(client, state):
-    sid, h = _session(client, state)
-    llm = MisbehavingLLM(NLUResult(intent="credit_eligibility", amount=1000.0, months=12),
-                         rewrite="Su crédito está aprobado sin condiciones, sin verificación.")
+    c = next(c for c in customers_by_offer_profile(state)["consent_pre"] if offer_amount(state, c["cid"]))
+    sid, h = login(client, state, c["doc"])
+    amount, months = offer_amount(state, c["cid"], share=0.5)
+    llm = MisbehavingLLM(NLUResult(intent="credit_eligibility", product="personal_loan", amount=float(int(amount)),
+                                   months=months), rewrite="Su crédito está aprobado sin condiciones, sin verificación.")
     state.orchestrator.llm = llm
-    r = say(client, sid, h, "quiero un préstamo de 1000 a 12 meses")
+    r = say(client, sid, h, f"quiero un préstamo de {int(amount)} a {months} meses")
     assert r["outcome"] == "eligible" and "aprobado sin condiciones" not in r["reply"] and "simulación" in r["reply"]
     assert llm.compose_calls == []                                           # ni se le pidio reescribir una decision
     # Con una propuesta ya evaluada, al despedirse llega el RESUMEN de esa propuesta (plantilla), no una oferta nueva

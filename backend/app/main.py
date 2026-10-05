@@ -7,6 +7,8 @@ import secrets
 import time
 import uuid
 
+import yaml
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -23,7 +25,8 @@ from app.data.repository import SnapshotRepository
 from app.deps import AppState
 from app.errors import register_error_handlers
 from app.logging_setup import log, setup_logging, trace_id_var
-from app.policy import credit_engine as ce
+from app.core.offers import OfferStore
+from app.policy import engine as eng
 
 logger = logging.getLogger("chat.http")
 _TRACE_OK = re.compile(r"^[A-Za-z0-9\-]{8,64}$")
@@ -42,14 +45,17 @@ def build_state(settings: Settings) -> AppState:
         secret = secrets.token_urlsafe(32)
         logging.getLogger("chat").warning("CHAT_JWT_SECRET vacio: se genero uno temporal; las sesiones no sobreviven al reinicio.")
     repo = SnapshotRepository(settings.data_dir)
-    policy = ce.load_policy(settings.policy_path)
+    policy = eng.load_policy()
+    with open(settings.rules_path, encoding="utf-8") as f:
+        rules = yaml.safe_load(f)
     queue = HandoffQueue()
     outbox = Outbox(settings.outbox_dir)
+    offers = OfferStore(settings.offers_path)
     return AppState(
-        settings=settings, repo=repo, policy=policy, jwt_secret=secret, queue=queue, outbox=outbox,
+        settings=settings, repo=repo, policy=policy, rules=rules, jwt_secret=secret, queue=queue, outbox=outbox, offers=offers,
         store=SessionStore(settings.session_ttl_minutes),
         lockout=AuthLockout(settings.auth_max_attempts, settings.auth_lockout_minutes, secret),
-        orchestrator=Orchestrator(repo, policy, make_llm(settings), queue, _rewrite_kinds(settings), outbox),
+        orchestrator=Orchestrator(repo, policy, rules, make_llm(settings), queue, _rewrite_kinds(settings), outbox, offers),
     )
 
 
@@ -94,7 +100,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def meta(request: Request) -> dict:
         st: AppState = request.app.state.ctx
         return {"version": __version__, "llm_provider": st.orchestrator.llm.name,
-                "policy_version": st.policy["version"], "policy_synthetic": st.policy["synthetic"],
+                "policy_version": st.policy.version, "policy_synthetic": True,
                 "data_source": st.settings.data_source,
                 "languages": ["es", "pt"]}
 

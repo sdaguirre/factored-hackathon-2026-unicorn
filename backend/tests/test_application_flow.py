@@ -8,16 +8,16 @@ import pytest
 from app.agent import documents
 from app.core.outbox import Outbox
 from app.core.pdf import render_summary_pdf
-from tests.conftest import customers_by_offer_profile, login, pick_customers
+from tests.conftest import customers_by_offer_profile, login, offer_amount, pick_customers
 
 ALL_DOCS = "id_copy,address_proof,income_proof"
 
 
 @pytest.fixture()
 def cust(state):
-    """Cliente preaprobado (cualquier consentimiento) con ingreso registrado."""
+    """Cliente preaprobado (cualquier consentimiento) con ingreso registrado y un prestamo personal disponible."""
     g = customers_by_offer_profile(state)
-    return (g["consent_pre"] + g["noconsent_pre"])[0]
+    return next(c for c in g["consent_pre"] + g["noconsent_pre"] if offer_amount(state, c["cid"]))
 
 
 def set_docs(state, cid, docs: str):
@@ -32,12 +32,15 @@ def say(client, sid, h, text, language=None):
 
 
 def evaluated(client, state, cust, docs=ALL_DOCS, language="es"):
-    """Sesion con una propuesta elegible ya evaluada."""
+    """Sesion con una propuesta elegible ya evaluada; a la pregunta del hogar (politica 0.4) el cliente dice que no."""
     set_docs(state, cust["cid"], docs)
     sid, h = login(client, state, cust["doc"], language)
-    r = say(client, sid, h, f"quiero un préstamo de {int(cust['income'] * 0.1)} a 24 meses" if language == "es"
-            else f"quero um empréstimo de {int(cust['income'] * 0.1)} em 24 meses")
-    assert r["outcome"] == "eligible", r
+    amount, months = offer_amount(state, cust["cid"], share=0.3)
+    r = say(client, sid, h, f"quiero un préstamo de {int(amount)} a {months} meses" if language == "es"
+            else f"quero um empréstimo de {int(amount)} em {months} meses")
+    assert r["outcome"] == "eligible" and r["awaiting"] == "household", r
+    r = say(client, sid, h, "no" if language == "es" else "não")
+    assert r["awaiting"] == "proceed", r
     return sid, h, r
 
 
@@ -104,15 +107,19 @@ def test_an_unclear_answer_repeats_the_same_question(client, state, cust):
 
 def test_income_declared_in_the_chat_adds_bank_statements_to_the_requirements(client, state):
     _, no_income = pick_customers(state)
+    no_income = no_income[no_income.max_term_personal_loan_months >= 24]   # sin tope por edad que impida el prestamo
     if no_income.empty:
         pytest.skip("sin cliente sin ingreso registrado")
     row = no_income.iloc[0]
-    set_docs(state, row.name if hasattr(row, "name") else row.customer_id, "id_copy")
+    set_docs(state, row.customer_id, "id_copy")
     sid, h = login(client, state, str(row.document_number))
-    say(client, sid, h, "quiero un préstamo de 2000 a 24 meses")
-    r = say(client, sid, h, "gano 9000000")
-    if r["outcome"] != "eligible_provisional":
-        pytest.skip("el caso no quedo elegible provisional con este conjunto de datos")
+    assert say(client, sid, h, "quiero un préstamo")["awaiting"] == "income"
+    say(client, sid, h, "gano 9000000")
+    r = say(client, sid, h, "quiero un préstamo")                 # lo mas alto con el ingreso declarado
+    assert r["outcome"] == "offer" and r["awaiting"] == "amount", r
+    r = say(client, sid, h, "sí")
+    assert r["outcome"] == "eligible_provisional" and r["awaiting"] == "household"
+    say(client, sid, h, "no")
     r = say(client, sid, h, "sí")
     assert "estados de cuenta" in r["reply"]                                       # exigencia extra por ingreso no verificado
     assert "bank_statements_3m" in state.store.get(sid).slots["application"]["required"]
@@ -132,7 +139,8 @@ def test_closing_after_an_evaluation_gives_the_summary_and_the_email_notice_but_
     sid, h, _ = evaluated(client, state, cust)
     r = say(client, sid, h, "gracias, eso es todo")
     assert r["summary_ready"] is True and r["proactive_offer"] is False
-    assert "Plazo: 24 meses" in r["reply"] and "PDF" in r["reply"] and "***@" in r["reply"]
+    months = state.store.get(sid).slots["last_evaluation"]["request"]["months"]
+    assert f"Plazo: {months} meses" in r["reply"] and "PDF" in r["reply"] and "***@" in r["reply"]
     assert r["email"]["status"] == "simulated_not_sent" and "***@" in r["email"]["to"]
 
 
@@ -180,6 +188,22 @@ def test_the_agent_summary_includes_the_offer_and_the_queued_email(client, state
     assert any(a["type"] == "summary_email_queued" for a in s["actions_taken"])
 
 
+def test_the_accepted_offer_is_recorded_and_linked_to_the_handoff(client, state, cust):
+    """Al avanzar se registra la fila de credit_offers (la API, nunca el LLM) y al derivar queda enlazada a su ticket."""
+    sid, h, _ = evaluated(client, state, cust, docs=ALL_DOCS)
+    r = say(client, sid, h, "sí")
+    s = next(x for x in state.queue.list() if x["ticket_id"] == r["handoff_ticket"])
+    offer = s["accepted_offer"]
+    for key in ("offer_id", "option_code", "amount_usd", "annual_rate_pct", "monthly_installment_usd",
+                "debt_to_income_after", "flags", "open_complaints", "policy_version"):
+        assert key in offer
+    assert offer["policy_version"] == "0.4" and offer["debt_to_income_after"] <= 0.20
+    assert offer["offer_id"] in s["narrative"] or offer["option_code"] in s["narrative"]
+    row = state.offers.latest()[offer["offer_id"]]
+    assert row["status"] == "handed_off" and row["handoff_ticket_id"] == r["handoff_ticket"]
+    assert row["customer_id"] == cust["cid"] and row["session_id"] == sid
+
+
 def test_portuguese_flow_uses_portuguese_documents_and_labels(client, state, cust):
     sid, h, _ = evaluated(client, state, cust, docs="id_copy", language="pt")
     r = say(client, sid, h, "sim")
@@ -191,10 +215,13 @@ def test_portuguese_flow_uses_portuguese_documents_and_labels(client, state, cus
 # ---------------------------------------------------------------- unidades
 
 def test_required_documents_depend_on_product_and_on_unverified_income(state):
-    p = state.policy
+    p = state.rules
     assert documents.required_documents(p, "personal_loan", False) == ["id_copy", "address_proof", "income_proof"]
     assert "property_deed" in documents.required_documents(p, "mortgage", False)
+    assert documents.required_documents(p, "credit_card", False) == ["id_copy", "address_proof", "income_proof"]
     assert documents.required_documents(p, "personal_loan", True)[-1] == "bank_statements_3m"
+    assert documents.required_documents(p, "personal_loan", True, household=True)[-2:] == ["household_id_copy",
+                                                                                           "household_income_proof"]
 
 
 def test_pdf_handles_accents_and_special_symbols():

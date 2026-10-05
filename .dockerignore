@@ -1,0 +1,11 @@
+# Contexto de construccion del backend (docker-compose.yml: context ".", dockerfile backend/Dockerfile).
+# Lista blanca: solo entra lo que la imagen necesita. Nunca .local/ (datos derivados del organizador), .env ni pruebas.
+*
+!backend/requirements.txt
+!backend/app
+!backend/policy
+!backend/data
+!data/policy/credit_policy.py
+!data/reference/*.csv
+**/__pycache__
+**/*.pyc

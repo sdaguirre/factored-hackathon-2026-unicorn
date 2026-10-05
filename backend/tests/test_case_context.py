@@ -98,7 +98,7 @@ def test_repository_returns_only_whitelisted_fields(repo):
 
 
 def test_repository_without_case_file_has_no_cases(tmp_path):
-    for name in ("customers", "products", "branches", "transactions"):
+    for name in ("customers", "credit_profile", "products", "branches", "transactions"):
         pd.read_parquet(FIXTURE / f"{name}.parquet").to_parquet(tmp_path / f"{name}.parquet")
     assert SnapshotRepository(tmp_path).case_context("FXC-002") == []
 

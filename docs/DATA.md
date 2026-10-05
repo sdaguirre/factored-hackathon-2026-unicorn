@@ -7,7 +7,7 @@
 | Dataset del organizador (13 tablas, banco sintético en México, Colombia y Argentina, jun-2023 a jun-2026) | Bucket S3 del organizador, acceso de solo lectura | **No** |
 | Snapshot derivado (225 clientes con productos y movimientos recientes, más el perfil crediticio) | Generado por `backend/scripts/build_snapshot.py` a partir del dataset | **No** (`backend/data/snapshot/`, en `.gitignore`) |
 | Conjunto de ejemplo del equipo (21 clientes) | Inventado por el equipo con semilla fija: `backend/scripts/make_fixture.py` | Sí (`backend/data/fixture/`) |
-| Política de crédito (tope de endeudamiento, bandas de score, tasas) | Inventada por el equipo | Sí (`backend/policy/credit_policy.yaml`) |
+| Política de crédito 0.4 (tope de endeudamiento, bandas, tasas, plazos) | Inventada por el equipo | Sí (`data/reference/*.csv`, `data/policy/credit_policy.py`) |
 | Conversaciones y frases de prueba del NLU | Escritas por el equipo (un solo anotador) | Sí (`backend/eval/nlu_cases.py`) |
 
 ## Hallazgos que condicionaron el diseño

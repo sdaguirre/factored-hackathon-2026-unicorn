@@ -8,6 +8,7 @@ from fastapi import Depends, Header, Request
 from app.agent.orchestrator import Orchestrator
 from app.agent.tools import HandoffQueue
 from app.config import Settings
+from app.core.offers import OfferStore
 from app.core.outbox import Outbox
 from app.core.ratelimit import AuthLockout
 from app.core.security import api_key_valid, read_session_token
@@ -15,18 +16,21 @@ from app.core.sessions import AUTHENTICATED, Session, SessionStore
 from app.data.repository import CustomerRepository
 from app.errors import ApiError
 from app.logging_setup import trace_id_var
+from app.policy.engine import Policy
 
 
 @dataclass
 class AppState:
     settings: Settings
     repo: CustomerRepository
-    policy: dict
+    policy: Policy
+    rules: dict
     store: SessionStore
     lockout: AuthLockout
     queue: HandoffQueue
     orchestrator: Orchestrator
     outbox: Outbox
+    offers: OfferStore
     jwt_secret: str
 
 

@@ -9,7 +9,7 @@ Datos y política sintéticos (prototipo).
 |---|---|---|
 | Entender el mensaje, detectar idioma, sentimiento y tema delicado | LLM, salida JSON validada | Es lenguaje, no decisión |
 | Redactar saludos, cierres y preguntas de aclaración | LLM, **solo mensajes de bajo riesgo** | Las decisiones y ofertas salen de plantillas revisadas |
-| Elegibilidad, monto máximo y tasa | Motor determinista (`backend/app/policy/credit_engine.py`); reference rules: policy 0.4 ([`CREDIT_RULES.md`](CREDIT_RULES.md)), computed in gold and implemented in `data/policy/` | El modelo no puede aprobar ni inventar reglas |
+| Elegibilidad, monto máximo y tasa | Motor determinista: política 0.4 ([`CREDIT_RULES.md`](CREDIT_RULES.md)), la misma de gold, vía `data/policy/` (`backend/app/policy/engine.py`) | El modelo no puede aprobar ni inventar reglas |
 | Datos y permisos del cliente | Herramientas (`backend/app/agent/tools.py`), con el `customer_id` de la sesión autenticada | Ninguna herramienta recibe un `customer_id` del modelo |
 | Derivar a un humano | Código: solo si el cliente lo pidió de forma explícita o confirmó una oferta de derivación | Una derivación es una acción |
 | Cuándo ofrecer crédito sin que lo pidan | Código (`backend/app/agent/proactive.py`) | Es una decisión comercial y de consentimiento |

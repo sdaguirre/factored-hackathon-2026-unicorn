@@ -12,9 +12,10 @@ Estados de verificacion (el texto lo pone la interfaz, por idioma):
 """
 from __future__ import annotations
 
-from app.policy import credit_engine as ce
+from app.agent.tools import to_local
+from app.policy import engine as eng
 
-CONCLUSIVE = (ce.ELIGIBLE, ce.ELIGIBLE_PROVISIONAL, ce.DECLINED)
+CONCLUSIVE = (eng.ELIGIBLE, eng.ELIGIBLE_PROVISIONAL, eng.DECLINED, eng.UNAVAILABLE)
 HANDOFF_KINDS = ("handoff_created", "application_ready")
 
 
@@ -23,18 +24,22 @@ def _last(trace: list[dict], tool: str) -> dict | None:
 
 
 def _customer(profile: dict) -> dict:
+    """Perfil de gold en moneda local, con los nombres que muestra la interfaz."""
     return {"status": profile["customer_status"], "country": profile["country"],
-            "monthly_income": profile["monthly_income"], "income_ccy": profile["income_ccy"],
-            "monthly_debt": profile["existing_monthly_debt"], "active_products": profile["n_active_products"],
-            "days_past_due": profile["max_days_past_due"]}
+            "monthly_income": to_local(profile, profile.get("income_used_usd")), "income_ccy": profile["local_currency"],
+            "monthly_debt": to_local(profile, profile.get("current_installments_usd")),
+            "active_products": profile.get("active_products"), "days_past_due": profile.get("max_days_past_due"),
+            "risk_band": profile.get("risk_band"), "offer_mode": profile.get("offer_mode")}
 
 
 def _evaluation(run: dict) -> dict:
-    d, req = run["decision"], run["request"]
-    return {"product": req["product"], "amount": req["amount"], "months": req["months"], "ccy": run["ccy"],
-            "outcome": d.outcome, "reasons": list(d.reasons), "rate_pct": d.rate_pct, "payment": d.payment,
-            "dti_after": d.dti_after, "max_dti": run["max_dti"], "max_amount": d.max_amount,
-            "policy_version": d.policy_version, "income_declared": run["income_declared"]}
+    q, req, p = run["quote"], run["request"], run["quote"].profile
+    return {"product": req["product"], "amount": req["amount"], "months": q.term_months, "ccy": run["ccy"],
+            "outcome": q.outcome, "reasons": list(q.reasons), "rate_pct": q.rate_pct,
+            "payment": to_local(p, q.installment_usd), "dti_after": q.dti_after, "max_dti": run["max_dti"],
+            "max_amount": to_local(p, q.max_amount_usd, floor=True), "policy_version": q.policy_version,
+            "income_declared": q.conditional, "flags": list(q.flags),
+            "option_code": q.option["option_code"] if q.option else None, "tier": q.option["tier"] if q.option else None}
 
 
 def build_evidence(trace: list[dict], facts: dict) -> dict | None:
@@ -61,7 +66,7 @@ def build_evidence(trace: list[dict], facts: dict) -> dict | None:
                                "reasons": evaluation["reasons"]}})
         verification.append({"code": "policy", "status": "verified" if evaluation["outcome"] in CONCLUSIVE else "inconclusive",
                              "detail": evaluation["policy_version"]})
-        if run["income_declared"]:
+        if run["quote"].conditional:
             verification.append({"code": "income_declared", "status": "unverified"})
 
     offer = _last(trace, "offer_rates") if kind == "offers" or facts.get("proactive_offer") else None
