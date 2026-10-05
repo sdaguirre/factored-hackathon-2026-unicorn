@@ -69,6 +69,8 @@ def main() -> int:
                 msg = "¿qué tasas tienen para mí?" if a.lang == "es" else "quais são as taxas para mim?"
                 st, r = call(base, "POST", f"/v1/sessions/{s['session_id']}/messages", {"message": msg}, s["token"])
                 check(st == 200 and bool(r.get("reply")), "una consulta recibe respuesta", f"intent={r.get('intent')} outcome={r.get('outcome')}")
+                st, e = call(base, "POST", f"/v1/sessions/{s['session_id']}/end", None, s["token"])
+                check(st == 200 and bool(e.get("reply")), "el cierre devuelve un mensaje", f"HTTP {st}")
                 call(base, "DELETE", f"/v1/sessions/{s['session_id']}", None, s["token"])
 
     failed = [w for ok, w in results if not ok]

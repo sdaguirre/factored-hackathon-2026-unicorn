@@ -25,7 +25,7 @@ Medidos sobre las tablas descargadas del organizador.
 | Variantes de país | "México"/"Mexico" en `transaction_country` e `ip_country` | Normalización en la capa silver |
 | Filas menores a las documentadas | Quejas 67.095 de 80.000; transacciones 4,43 M de 5 M; llamadas 686.296 de 800.000. `digital_events` trae **más** (15,6 M frente a 10 M) | Preguntar a los organizadores; no se asume pérdida de datos |
 | Sin claves duplicadas | 0 duplicados por clave primaria en clientes, productos y quejas | La deduplicación del handoff es inocua pero no demuestra el "2%" documentado |
-| Integridad de claves | `registration_branch_id` casi nunca cruza con sucursales (5 de 150.000); la fecha de registro nunca coincide con la del primer producto | Las preguntas de seguridad usan **productos** y movimientos, no el registro del cliente |
+| Integridad de claves | `registration_branch_id` casi nunca cruza con sucursales (5 de 150.000); la fecha de registro nunca coincide con la del primer producto | Las preguntas de seguridad usan **productos** (año y ciudad de apertura) y el perfil (ocupación). El año de registro solo entra como una pregunta más (`customer_since`) para llegar al 87% de cobertura; ver `backend/README.md` |
 | `digital_events` y `campaign_sends` no aportan al crédito | 24% de los eventos sin `customer_id`; el país por IP coincide 100% con el del cliente; conversión de campañas 0,3% a 0,7% | Fuera de alcance |
 | Fraude | 0,1% de las transacciones. `fraud_score` medio 49,5 en fraudes y 15,0 en el resto. Sin `fraud_score`, ningún modelo supera al azar | Solo baseline de triaje |
 | Edades atípicas | 29% de los clientes tiene 66 años o más; 10.422 clientes sin productos | No se usa la edad en ninguna decisión |
