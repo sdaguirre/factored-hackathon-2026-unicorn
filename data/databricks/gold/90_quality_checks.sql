@@ -104,6 +104,18 @@ checks AS (
                                             OR offer_mode = 'none')) AS n
           FROM IDENTIFIER(:gold_schema || '.customer_credit_offer_options'))
 
+    -- 8b. Exactly one featured option per customer and product with any available option, none
+    --     otherwise, and never an unavailable one.
+    UNION ALL
+    SELECT 'customer_credit_offer_options', 'featured_option_violations',
+           CAST(count(*) AS DOUBLE), '= 0',
+           CASE WHEN count(*) = 0 THEN 'ok' ELSE 'fail' END
+    FROM (SELECT customer_id, product_code
+          FROM IDENTIFIER(:gold_schema || '.customer_credit_offer_options')
+          GROUP BY customer_id, product_code
+          HAVING count_if(is_featured) != CASE WHEN bool_or(is_available) THEN 1 ELSE 0 END
+              OR count_if(is_featured AND NOT is_available) > 0)
+
     -- 9. Customer summaries (gold/30-32): one row per customer. A duplicate means a join (usually
     --    the exchange rate one) multiplied rows.
     UNION ALL

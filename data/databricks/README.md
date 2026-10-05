@@ -29,7 +29,7 @@ snake_case; gold tables per customer are `customer_<subject>`.
 | `02_silver_quality_checks.sql` | Bronze/silver metrics in `pipeline_quality_metrics`, then a gate that fails the run | silver | Job `latam_bank_medallion` |
 | `load_silver_reference.sql` | `ref_product_catalog`, `ref_term_grid`, `ref_policy_params`, `ref_policy_bands`, `ref_segment_adjustments` | silver | When a CSV in `data/reference/` changes (`load_reference.py`) |
 | `gold/00_deploy_objects.sql` | `fn_monthly_installment`, `fn_max_principal`, `credit_offers` | gold | Jobs `credit_gold_deploy` and `latam_bank_medallion` (idempotent) |
-| `gold/10_customer_credit_profile.sql` | `customer_credit_profile` | gold | Jobs `latam_bank_medallion` and `credit_policy_refresh` |
+| `gold/10_customer_credit_profile.sql` | `customer_credit_profile` and the agent view `customer_credit_offer_context` | gold | Jobs `latam_bank_medallion` and `credit_policy_refresh` |
 | `gold/20_customer_credit_offer_options.sql` | `customer_credit_offer_options` | gold | After the profile |
 | `gold/30_customer_products_summary.sql` | `customer_products_summary` | gold | Job `latam_bank_medallion` |
 | `gold/31_customer_complaints_summary.sql` | `customer_complaints_summary` | gold | Job `latam_bank_medallion` |
@@ -42,11 +42,15 @@ snake_case; gold tables per customer are `customer_<subject>`.
 | Object | Grain | Purpose |
 |---|---|---|
 | `customer_credit_profile` | one row per customer | Income used, current installments, 20% capacity, risk band, rate adjustment, maximum terms, reason codes R01–R08, `is_eligible`, `offer_mode`, advisor-review flag, FX used |
-| `customer_credit_offer_options` | customer × `ref_term_grid` option | Alternatives, each using the whole 20% capacity: offer rate, maximum amount, installment and availability, in USD and local currency. Loans at any amount in the product range up to the band maximum term |
+| `customer_credit_offer_options` | customer × `ref_term_grid` option | Alternatives, each using the whole 20% capacity: offer rate, maximum amount, installment and availability, in USD and local currency. Loans at any amount in the product range up to the band maximum term. `is_featured` marks the option to present first per product (highest tier or amount; ties to the shortest term) |
+| `customer_credit_offer_context` (view) | one row per customer | The 25 profile columns the agent and the rules service need (eligibility, offer mode, capacity, pricing inputs, band maximum terms, open complaints). Rebuilt with the profile |
 | `credit_offers` | one row per accepted offer | Written by the API only. Change Data Feed on; CHECK constraints on status, origin, positive amounts and the 20% limit. Never dropped by a deploy |
 | `customer_products_summary`, `customer_complaints_summary`, `customer_cashflow_summary` | one row per customer | Descriptive context (products and delinquency, complaints by type/status/priority, last 90 days of transactions). Not used by the credit rules |
 | `pipeline_quality_metrics` | run × table × metric | Data quality and lineage metrics of every run (`run_id`, `run_at`, `layer`, `table_name`, `metric`, `value`, `threshold`, `status`). Appended, never rebuilt |
 | `fn_monthly_installment`, `fn_max_principal` | — | Annuity formulas the rules service must reproduce exactly |
+
+Every column of the profile, the options and the view has a description in Unity Catalog
+(`ALTER COLUMN ... COMMENT` at the end of `gold/10` and `gold/20`, reapplied on each rebuild).
 
 `offer_mode`: `proactive` (eligible, marketing consent, no open Critical complaint),
 `on_customer_interest` (eligible, offer only if the customer asks about credit) or `none`.
@@ -72,7 +76,8 @@ Gold checks (`gold/90_quality_checks.sql`) fail the run when: the profile does n
 silver customer; cutoff, policy version or exchange rate is missing; the profile was built with a
 different policy version than silver; the eligible share leaves 20–50%; the options are not one per
 customer and grid row; any available option exceeds the 20% capacity, the band maximum term or its
-amount range; or a customer summary has duplicate customers.
+amount range; a product with available options has not exactly one featured option; or a
+customer summary has duplicate customers.
 
 ## Jobs (Databricks Asset Bundle)
 

@@ -7,7 +7,8 @@ data/reference/*.csv, the source of truth that is also loaded into silver ref_*.
 Pure functions, standard library only:
     load_policy()                         read the reference CSVs
     monthly_installment / max_principal   annuity formulas (= gold fn_* and backend pmt/pv)
-    offer_options(profile, policy)        baseline options for one customer (= gold options)
+    offer_options(profile, policy)        baseline options for one customer (= gold options),
+                                          with is_featured: the one to present first per product
     recalculate(profile, policy, ...)     profile after data declared in the chat (live recalc)
     build_credit_offer(...)               row for gold credit_offers when the customer accepts
 
@@ -131,8 +132,23 @@ def offer_options(profile: dict, policy: Policy) -> list[dict]:
                     "option_min_amount_usd": lo, "option_max_amount_usd": hi, "term_allowed": term_allowed,
                     "is_available": is_available, "unavailable_reason": reason,
                     "offer_max_amount_usd": capped if is_available else None,
-                    "offer_monthly_installment_usd": installment})
+                    "offer_monthly_installment_usd": installment, "is_featured": False})
+    _mark_featured(out)
     return out
+
+
+def _mark_featured(options: list[dict]) -> None:
+    """The option to present first per product (= gold is_featured): cards the highest available
+    tier, loans the highest amount; ties (several terms at the product maximum) go to the shortest term."""
+    best: dict = {}
+    for o in options:
+        if not o["is_available"]:
+            continue
+        key = (-o["option_max_amount_usd"], -o["offer_max_amount_usd"], o["term_months"])
+        if o["product_code"] not in best or key < best[o["product_code"]][0]:
+            best[o["product_code"]] = (key, o)
+    for _, o in best.values():
+        o["is_featured"] = True
 
 
 # ---------------------------------------------------------------------------------------------

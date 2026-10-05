@@ -12,9 +12,10 @@ exactly what gold computes, and the tools that are ready to help.
 |---|---|---|
 | Gold profile and offer options (150,000 customers, 1.8M options) | `workspace.gold_latam_bank` | Built with policy 0.3 |
 | Parquet export of gold + `ref_*` for serving | Written by the jobs to `workspace.gold_latam_bank.exports` (`gold/95_export_for_serving.py`); `data/scripts/export_gold.py` downloads it to `.local/gold/` (git-ignored) | Production export available (2026-06-30 cutoff, policy 0.3) |
-| Reference implementation of the policy in Python | `data/policy/credit_policy.py` | Matches gold on all 1.8M options |
+| Reference implementation of the policy in Python | `data/policy/credit_policy.py` | Matches gold on all 1.8M options, including `is_featured` |
 | Parity check for any engine | `data/scripts/check_engine_parity.py` | 0 mismatches for the reference |
-| Unit tests on the worked example (no organizer data) | `data/policy/test_credit_policy.py` | 12 passing |
+| Agent view of the profile (25 contract columns, one row per customer) | `workspace.gold_latam_bank.customer_credit_offer_context` | Rebuilt with the profile |
+| Unit tests on the worked example (no organizer data) | `data/policy/test_credit_policy.py` | 15 passing |
 
 The reference module is standard library only and pure: `load_policy()`, `offer_options()`,
 `recalculate()` and `build_credit_offer()`. It can be imported by the backend or used as an
@@ -43,6 +44,30 @@ pytest data/policy                                         # worked example
 | Currency | Income currency (local) | USD internally (`fx_to_usd`); local only for display |
 | Flags | — | `F02_NEAR_LIMIT_DECLARED_INCOME`, `F03_DECLARED_DATA`, `F04_OPEN_COMPLAINTS` |
 
+## Reading the data: Databricks first, Parquet as fallback
+
+The options do not need to be downloaded: they are computed from one profile row and the five
+small `ref_*` tables, in milliseconds and identical to gold.
+
+```
+at startup:          SELECT * FROM <silver>.ref_*                          -> memory
+at authentication:   SELECT * FROM <gold>.customer_credit_offer_context
+                     WHERE customer_id = :id                               -> 1 row
+in the chat:         offer_options() / recalculate() in memory
+on acceptance:       INSERT INTO <gold>.credit_offers
+```
+
+| | Query Databricks | Parquet export |
+|---|---|---|
+| Data | Always current | Snapshot of the last job |
+| Credentials in the container | Service principal token in `backend/.env` | None |
+| Warehouse asleep or no network | First query takes a few seconds; fails without network | Works offline |
+| Jury clones the repo and runs the demo | Not possible without workspace access | Possible with the sample set |
+
+Use both: Databricks when credentials are set, and the Parquet export (or the sample set) as the
+automatic fallback, so the demo keeps working if Databricks does not answer (the brief asks for a
+safe fallback). The repository interface in the backend already allows swapping the source.
+
 ## Changes by file
 
 1. **Data (`backend/scripts/build_snapshot.py`, `app/data/repository.py`).** Join the snapshot
@@ -56,7 +81,9 @@ pytest data/policy                                         # worked example
    context to the repository root).
 3. **Tools (`app/agent/tools.py`).** Three tools, none taking `customer_id`:
    - `get_offers()`: gold options for the session customer, gated by `offer_mode`
-     (`on_customer_interest` only after the customer asks about credit);
+     (`on_customer_interest` only after the customer asks about credit). Present the
+     `is_featured` option of each product first (the highest; see CREDIT_RULES section 7) and
+     keep the rest as alternatives;
    - `recalculate_offer(declared_income, additional_income, external_installments, product,
      amount, term)`: converts local amounts with `fx_to_usd`, calls `recalculate()`;
    - `accept_offer(option_code, term_months, amount)`: recomputes, calls `build_credit_offer()`
