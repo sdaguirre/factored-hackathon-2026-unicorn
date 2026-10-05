@@ -69,22 +69,44 @@ curl -s localhost:8000/v1/sessions -H 'Content-Type: application/json' \
 
 ## Autenticación por preguntas de seguridad
 
-Tres preguntas de tipos distintos, cuatro opciones cada una, generadas desde los datos del cliente:
+Tres preguntas de tipos distintos, cuatro opciones cada una, generadas desde los datos del cliente. La serie (ocupación,
+ciudad y años) se eligió midiendo cada candidata con los 150.000 clientes: **sin montos, sin fechas exactas y sin pedir
+recordar una operación**.
 
-| Tipo | Ejemplo |
-|---|---|
-| Ciudad de apertura de un producto | ¿En qué ciudad abrió su cuenta de ahorro con terminación 6611? |
-| Mes y año de apertura | ¿En qué mes y año abrió su préstamo hipotecario con terminación 0917? |
-| Ciudad de un movimiento reciente | ¿En qué ciudad hizo su compra del 13/05/2026? |
-| Monto de un movimiento reciente | ¿Cuál fue el monto de su compra del 08/01/2026? |
+| Tipo | Ejemplo | Cobertura | Acierto al azar |
+|---|---|---|---|
+| `occupation` | ¿Cuál es su ocupación registrada en el banco? | 90% | 25% (20 valores uniformes) |
+| `product_city` | ¿En qué ciudad abrió su cuenta de ahorro? (solo productos abiertos en sucursal) | 63% | 25%, con distractores del **mismo país** |
+| `product_year` | ¿En qué año abrió su tarjeta de crédito más antigua? | 90% | 25% |
+| `customer_since` | ¿En qué año se hizo cliente del banco? | 100% | 25% |
 
-Reglas: se exigen **todas** correctas; 3 fallos por documento bloquean 15 minutos (incluso en sesiones nuevas);
-cada fallo entrega preguntas nuevas; un documento inexistente recibe un reto señuelo con la misma forma, para no
-revelar qué documentos existen; la verificación es en tiempo constante; el LLM no ve ni genera las preguntas.
+Con estos cuatro tipos, el **87%** de los clientes tiene datos para 3 preguntas de tipos distintos (con la serie anterior,
+el 79%). Quien no los tiene recibe `AUTH_UNAVAILABLE` y se le deriva a un asesor.
 
-Hallazgos de los datos que condicionan el diseño: el lugar de registro del cliente (`registration_branch_id`) no
-cruza con la tabla de sucursales (solo 1 de cada 30.000 filas), y la fecha de registro nunca coincide con la del primer
-producto (en el 70% de los casos el producto es anterior al registro); por eso se usan **productos** (fecha y sucursal de apertura) y movimientos.
+Reglas de diseño:
+- **Un producto se nombra por su tipo** ("su cuenta de ahorro") o, si hay varios del mismo tipo, "el más antiguo" (sin
+  empate). Nunca por su terminación: el enunciado se muestra **antes** de autenticar y no debe llevar datos reales.
+- **Los distractores salen del mismo universo que la respuesta**: ciudades del mismo país y años válidos. Con
+  distractores de los tres países (solo hay 16 ciudades), quien conoce el país del cliente acertaba el 63%.
+- **La ciudad solo se pregunta si el producto se abrió en sucursal**: quien abrió online no tiene una ciudad que recordar.
+- **Se prefiere un solo tipo de año** por reto. Con dos, el año de alta y el de apertura pueden no cuadrar en estos datos.
+- Se exigen **todas** correctas; 3 fallos por documento bloquean 15 minutos (incluso en sesiones nuevas); cada fallo
+  entrega preguntas nuevas; la verificación es en tiempo constante; el LLM no ve ni genera las preguntas.
+- Un documento inexistente recibe un **reto señuelo**: los *tipos* de pregunta salen de un cliente real al azar (la
+  mezcla coincide con la de los clientes reales) y el contenido es inventado, nunca de ese cliente.
+
+Por qué se descartaron las anteriores (medido): el **monto** de una operación es difícil de recordar y un atacante que
+elige el valor central acierta el 45%; la **ciudad de una operación** coincide con la ciudad de residencia en el 95% de las
+operaciones; el **mes** de apertura exige más memoria que el año. Tampoco entran la fecha de nacimiento (está en el
+documento), el teléfono, el vencimiento de la tarjeta (impreso en ella), el estado civil ni la educación (sensibles), ni
+el comercio más frecuente (solo el 3% de los clientes tiene una categoría claramente dominante).
+
+**Límites conocidos.** (1) El texto de la pregunta todavía revela el *tipo* de un producto del cliente antes de
+autenticar (sin terminación): menos que antes, pero no es cero. (2) `customer_since` usa la fecha de registro, que en este
+dataset no cuadra con la del primer producto (`docs/DATA.md`): se mantiene para llegar al 87% de cobertura; sin él, bajaría
+al 57% (ocupación + ciudad + año de apertura obligatorios). (3) Todo se midió sobre datos sintéticos: con datos reales
+las distribuciones serán distintas. (4) La verificación por preguntas es débil por naturaleza; lo que protege es el límite
+de intentos y el bloqueo.
 
 ## Agente
 

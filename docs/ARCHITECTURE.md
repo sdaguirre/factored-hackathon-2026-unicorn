@@ -39,10 +39,12 @@ plantilla y cualquier texto que afirme ser humano se descarta.
 
 ## Autenticación
 
-Tres preguntas de seguridad de opción única generadas desde los datos del cliente (ciudad o mes y año de apertura de un
-producto; ciudad o monto de un movimiento reciente). Se exigen todas correctas; 3 fallos bloquean el documento 15 minutos;
-un documento inexistente recibe un reto señuelo con la misma forma. Límite conocido: adivinar acierta 1 de 64 veces por
-intento. Detalle en `backend/README.md`.
+Tres preguntas de seguridad de opción única generadas desde los datos del cliente: ocupación registrada, ciudad donde
+abrió un producto (solo si fue en sucursal), año de apertura de un producto y año en que se hizo cliente. Sin montos ni
+fechas exactas; los distractores salen siempre del mismo universo (mismo país, años válidos) y el enunciado no lleva datos
+reales como terminaciones. Se exigen todas correctas; 3 fallos bloquean el documento 15 minutos; un documento inexistente
+recibe un reto señuelo con la misma forma. Límite conocido: adivinar acierta 1 de 64 veces por intento. Detalle, cobertura
+medida y límites en `backend/README.md`.
 
 ## Oferta proactiva
 

@@ -43,6 +43,17 @@ def build_case_context(customer_ids: set[str], as_of: date) -> None:
           f"(corte {as_of}, ventana {WINDOW_DAYS} dias)")
 
 
+def add_profile_fields() -> None:
+    """Agrega ocupacion y fecha de registro al snapshot EXISTENTE (preguntas de seguridad) sin cambiar su muestra de clientes."""
+    path = OUT / "customers.parquet"
+    snap = pd.read_parquet(path).drop(columns=["occupation", "registration_date"], errors="ignore")
+    raw = pd.read_csv(RAW / "customers.csv", encoding="utf-8-sig", usecols=["customer_id", "occupation", "registration_date"])
+    out = snap.merge(raw, on="customer_id", how="left")
+    out.to_parquet(path, index=False)
+    print(f"customers.parquet: ocupacion en {out.occupation.notna().mean():.0%} y fecha de registro en "
+          f"{out.registration_date.notna().mean():.0%} de {len(out)} clientes")
+
+
 def main(n_customers: int) -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     cu = pd.read_csv(RAW / "customers.csv", encoding="utf-8-sig")
@@ -90,7 +101,8 @@ def main(n_customers: int) -> None:
 
     customers = (
         cu[cu.customer_id.isin(ids)][["customer_id", "document_type", "document_number", "first_name",
-                                      "country", "segment", "customer_status", "accepts_marketing", "email"]]
+                                      "country", "segment", "customer_status", "accepts_marketing", "email",
+                                      "occupation", "registration_date"]]   # ocupacion y ano de alta: preguntas de seguridad
         .merge(gold[["customer_id", "credit_score", "monthly_income", "existing_monthly_debt",
                      "max_days_past_due", "n_active_products", "income_ccy"]], on="customer_id")
     )
@@ -135,8 +147,12 @@ if __name__ == "__main__":
     ap.add_argument("--customers", type=int, default=400)
     ap.add_argument("--case-context-only", action="store_true",
                     help="solo regenera case_context.parquet para los clientes del snapshot existente (no toca el resto)")
+    ap.add_argument("--profile-only", action="store_true",
+                    help="solo agrega ocupacion y fecha de registro al customers.parquet existente (no cambia la muestra)")
     args = ap.parse_args()
-    if args.case_context_only:
+    if args.profile_only:
+        add_profile_fields()
+    elif args.case_context_only:
         OUT.mkdir(parents=True, exist_ok=True)
         build_case_context(set(pd.read_parquet(OUT / "customers.parquet").customer_id), AS_OF)
     else:

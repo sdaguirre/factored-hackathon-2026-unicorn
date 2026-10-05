@@ -38,8 +38,12 @@ class CustomerRepository(Protocol):
     def credit_profile(self, customer_id: str) -> dict: ...
     def products(self, customer_id: str) -> list[dict]: ...
     def recent_transactions(self, customer_id: str, limit: int = 40) -> list[dict]: ...
-    def branch_cities(self) -> list[str]: ...
+    def branch_cities(self, country: str | None = None) -> list[str]: ...
     def branch_city(self, branch_id: str) -> str | None: ...
+    def branch_country(self, branch_id: str) -> str | None: ...
+    def branch_countries(self) -> list[str]: ...
+    def profile_facts(self, customer_id: str) -> dict: ...
+    def random_customer_id(self, rng) -> str: ...
     def fx_rate(self, source: str, target: str) -> FxQuote | None: ...
     def contact_email_masked(self, customer_id: str) -> str | None: ...
     def documents_on_file(self, customer_id: str) -> set[str]: ...
@@ -73,7 +77,9 @@ class SnapshotRepository:
         self._by_doc = {str(r.document_number): r.customer_id for r in self._customers.itertuples()}
         self._cust = self._customers.set_index("customer_id")
         self._branch_city = dict(zip(self._branches.branch_id, self._branches.city))
+        self._branch_country = dict(zip(self._branches.branch_id, self._branches.country))
         self._cities = sorted(set(self._branches.city.dropna()))
+        self._cities_by_country = {c: sorted(set(g.city.dropna())) for c, g in self._branches.groupby("country")}
         self._prod_by_c = {k: g for k, g in self._products.groupby("customer_id")}
         self._tx_by_c = {k: g.sort_values("transaction_date", ascending=False)
                          for k, g in self._tx.groupby("customer_id")}
@@ -121,11 +127,33 @@ class SnapshotRepository:
         g = self._tx_by_c.get(customer_id)
         return [] if g is None else g.head(limit).to_dict("records")
 
-    def branch_cities(self) -> list[str]:
-        return self._cities
+    def branch_cities(self, country: str | None = None) -> list[str]:
+        """Ciudades con sucursal; con `country`, solo las de ese pais (los distractores de una pregunta deben salir de ahi)."""
+        return self._cities if country is None else list(self._cities_by_country.get(country, []))
 
     def branch_city(self, branch_id: str) -> str | None:
         return self._branch_city.get(branch_id)
+
+    def branch_country(self, branch_id: str) -> str | None:
+        return self._branch_country.get(branch_id)
+
+    def branch_countries(self) -> list[str]:
+        return sorted(self._cities_by_country)
+
+    def profile_facts(self, customer_id: str) -> dict:
+        """Datos de perfil que usan las preguntas de seguridad: ocupacion registrada y ano de alta (None si no hay)."""
+        r = self._cust.loc[customer_id]
+        occupation = _clean(r.occupation) if "occupation" in self._cust.columns else None
+        reg = _clean(r.registration_date) if "registration_date" in self._cust.columns else None
+        try:
+            year = int(pd.Timestamp(reg).year) if reg is not None else None
+        except (ValueError, TypeError):
+            year = None
+        return {"occupation": str(occupation) if occupation else None, "registration_year": year}
+
+    def random_customer_id(self, rng) -> str:
+        """Un cliente cualquiera, para que el reto senuelo tenga la misma forma que los reales."""
+        return self._customers.customer_id.iloc[rng.randrange(len(self._customers))]
 
     def fx_rate(self, source: str, target: str) -> FxQuote | None:
         """Tasa directa del dataset o, si falta el par, triangulada por USD. None si no hay datos."""

@@ -93,19 +93,21 @@ def docs_line(cid) -> str:
 
 def card(r) -> str:
     cid = r["cid"]
-    lines = []
-    prods = repo.products(cid)
-    for p in prods:
-        city = repo.branch_city(p["opening_branch_id"])
-        lines.append(f"  - {PROD.get(p['product_type'], p['product_type'])} con terminación **{p['last4']}**: abierta en "
-                     f"**{city}**, en **{fmt_month_year(pd.Timestamp(p['opening_date']).replace(day=1), 'es')}**")
-    txs = [t for t in repo.recent_transactions(cid)
-           if pd.Timestamp(t["transaction_date"]).date() >= AS_OF - timedelta(days=365)]
-    keys = [(t["transaction_type"], pd.Timestamp(t["transaction_date"]).date()) for t in txs]
-    uniq = [t for t, k in zip(txs, keys) if keys.count(k) == 1]
-    tx_lines = [f"  - {fmt_date(pd.Timestamp(t['transaction_date']))}, {TX[t['transaction_type']]}: ciudad **{t['transaction_city']}**, "
-                f"monto **{fmt_money(float(t['amount']), t['currency'])}**" for t in uniq]
-    return "\n".join(["- Productos (ciudad y mes de apertura):"] + lines + ["- Movimientos de los últimos 12 meses:"] + (tx_lines or ["  - (ninguno)"]) + [docs_line(cid)])
+    facts = repo.profile_facts(cid)
+    occ = kba.OCCUPATIONS["es"].get(facts["occupation"], facts["occupation"]) if facts["occupation"] else None
+    lines = [f"- Ocupación registrada: **{occ}**" if occ else "- Ocupación registrada: (ninguna)",
+             f"- Año en que se hizo cliente: **{facts['registration_year'] or '(sin dato)'}**",
+             "- Productos activos (año de apertura y, si se abrieron en sucursal, la ciudad; si hay varios del mismo tipo, "
+             "el reto pregunta por el más antiguo):"]
+    for p in repo.products(cid):
+        label = kba.PRODUCT_LABELS["es"].get(p["product_type"], p["product_type"])
+        year = pd.Timestamp(p["opening_date"]).year
+        if p.get("opening_channel") == "Branch":
+            where = f"apertura en sucursal de **{repo.branch_city(p['opening_branch_id'])}**"
+        else:
+            where = f"apertura por {p.get('opening_channel')} (no se pregunta la ciudad)"
+        lines.append(f"  - {label}: {where}, año **{year}**")
+    return "\n".join(lines + [docs_line(cid)])
 
 
 def phrases(r) -> list[str]:
@@ -147,8 +149,10 @@ md = ["# Datos de prueba del asistente",
       "",
       "1. Abra la interfaz (`http://localhost:8080`) y escriba el **documento** de un cliente de abajo.",
       "2. Responda las **preguntas de seguridad** con la ficha del cliente. Las preguntas cambian en cada intento y salen "
-      "de estos mismos datos: ciudad o mes y año de apertura de un producto (se identifica por su terminación), y ciudad o "
-      "monto de un movimiento (se identifica por su fecha y tipo). Las opciones incorrectas son inventadas.",
+      "de estos mismos datos: su ocupación registrada, la ciudad donde abrió un producto (solo si lo abrió en sucursal), "
+      "el año de apertura de un producto y el año en que se hizo cliente. Un producto se nombra por su tipo (o «el más "
+      "antiguo» si hay varios del mismo tipo). Las opciones incorrectas son inventadas y las ciudades son siempre del "
+      "mismo país. Nunca se pregunta por montos ni fechas exactas.",
       "3. Pruebe las frases sugeridas de cada escenario. Para portugués, cambie el selector de idioma antes de empezar.",
       "",
       "**Flujos de crédito:** tras una evaluación favorable el asistente pregunta si quiere avanzar. Si dice que sí, pide solo los "

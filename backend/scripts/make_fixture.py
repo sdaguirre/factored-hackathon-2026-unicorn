@@ -56,6 +56,31 @@ def month_start(d: date) -> date:
     return d.replace(day=1)
 
 
+OCCUPATIONS = ["Accountant", "Administrative", "Artist", "Consultant", "Director", "Doctor", "Driver", "Employee", "Engineer",
+               "Entrepreneur", "Homemaker", "Independent Professional", "Lawyer", "Manager", "Merchant", "Retired",
+               "Salesperson", "Student", "Teacher", "Technician"]
+NO_DATA_CUSTOMER = "FXC-010"      # el cliente al que le faltan datos para el reto de seguridad (escenario I), a proposito
+
+
+def add_security_question_data(customers: list[dict], products: list[dict]) -> None:
+    """Ocupacion y fecha de registro INVENTADAS (generador propio: no altera los demas datos) y garantia de que cada cliente
+    tiene un producto abierto en sucursal, salvo NO_DATA_CUSTOMER (sin ocupacion y sin productos abiertos en sucursal: solo
+    puede recibir 2 tipos de pregunta, asi que no se le puede verificar por este canal)."""
+    prof = random.Random(SEED + 303)
+    for c in customers:
+        year = prof.randrange(2018, 2026)
+        c["registration_date"] = datetime(year, prof.randrange(1, 13), prof.randrange(1, 28), 10, 0, 0).isoformat(sep=" ")
+        c["occupation"] = None if c["customer_id"] == NO_DATA_CUSTOMER else prof.choice(OCCUPATIONS)
+    seen: set[str] = set()
+    for p in products:
+        cid = p["customer_id"]
+        if cid == NO_DATA_CUSTOMER:
+            p["opening_channel"] = "App" if p["opening_channel"] == "Branch" else p["opening_channel"]
+        elif cid not in seen:
+            p["opening_channel"] = "Branch"          # el primero de cada cliente: ciudad de apertura recordable
+        seen.add(cid)
+
+
 # (cliente, origen, categoria, tipo, prioridad, estado, dias abierto, escalado, SLA incumplido, sentimiento, reincidente, canal)
 # Cada fila ejercita un camino de la conversacion: caso pendiente, caso critico, enojo previo, caso viejo, varios casos.
 # FXC-001 queda sin casos a proposito: es el cliente "limpio" (preaprobado, con consentimiento) de varias pruebas.
@@ -161,6 +186,7 @@ def main() -> None:
                             "currency": ccy, "merchant_name": rng.choice(MERCHANTS) if ttype == "Purchase" else None,
                             "transaction_city": city, "transaction_country": country})
 
+    add_security_question_data(customers, products)
     pd.DataFrame(customers).to_parquet(OUT / "customers.parquet", index=False)
     pd.DataFrame(products).to_parquet(OUT / "products.parquet", index=False)
     pd.DataFrame(branches).to_parquet(OUT / "branches.parquet", index=False)
