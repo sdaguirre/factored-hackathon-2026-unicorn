@@ -160,6 +160,14 @@ T: dict[str, dict[str, str | list[str]]] = {
         "es": "{fx}Con esa cuota usaría {dti} de su ingreso, por encima del máximo de {max_dti}, y con sus compromisos actuales hoy no hay margen para un nuevo crédito. Si sus ingresos cambiaron, cuénteme y lo recalculo.",
         "pt": "{fx}Com essa parcela você usaria {dti} da renda, acima do máximo de {max_dti}, e com seus compromissos atuais hoje não há margem para um novo crédito. Se sua renda mudou, me conte e eu recalculo.",
     },
+    "declined_reason": {
+        "es": "Por ahora no podemos ofrecerle este crédito porque {why}. Si quiere, un asesor puede revisar su caso. ¿Lo conecto?",
+        "pt": "Por enquanto não podemos oferecer este crédito porque {why}. Se quiser, um consultor pode revisar seu caso. Conecto você?",
+    },
+    "reask_number": {
+        "es": "Perdone, para seguir necesito una cifra.",
+        "pt": "Desculpe, para continuar preciso de um valor.",
+    },
     "declined_generic": {
         "es": "Por ahora no podemos ofrecerle este crédito según las políticas del banco. Si quiere, un asesor puede revisar su caso. ¿Lo conecto?",
         "pt": "Por enquanto não podemos oferecer este crédito segundo as políticas do banco. Se quiser, um consultor pode revisar seu caso. Conecto você?",
@@ -192,6 +200,10 @@ T: dict[str, dict[str, str | list[str]]] = {
     "offer_line_card": {
         "es": "{product} con cupo de hasta {max_amount} (tasa anual {rate})",
         "pt": "{product} com limite de até {max_amount} (taxa anual {rate})",
+    },
+    "offers_declared": {
+        "es": "Con el ingreso que usted me indicó, sujeto a verificación, esto es lo más alto que puedo ofrecerle hoy: {lines}. Es una simulación. ¿Cuál le interesa y por qué monto?",
+        "pt": "Com a renda que você informou, sujeita a verificação, isto é o máximo que posso oferecer hoje: {lines}. É uma simulação. Qual interessa e de que valor?",
     },
     "offers_none": {
         "es": "Con su capacidad de pago actual no alcanzo el monto mínimo de ninguno de nuestros créditos. Si sus ingresos cambiaron, cuénteme y lo recalculo.",
@@ -377,6 +389,33 @@ SUMMARY_TEXT = {
            "ticket_line": "\n• Acompanhamento: {ticket}"},
 }
 REASK = {"es": "Perdone, no le entendí bien. ", "pt": "Desculpe, não entendi bem. "}
+
+# Por que no hay oferta, por filtro de la politica (docs/CREDIT_RULES.md seccion 1). R07 no revela el motivo (fraude):
+# solo dice que lo revisa un asesor. {min_tenure} sale de ref_policy_params.
+DECLINE_WHY = {
+    "es": {"R01": "su cuenta no está activa",
+           "R02": "su relación con el banco es reciente (la política pide al menos {min_tenure} meses)",
+           "R03": "tiene pagos atrasados en un crédito",
+           "R04": "uno de sus productos está bloqueado o suspendido",
+           "R06_SCORE_BELOW_MIN": "su puntaje de crédito está por debajo del mínimo que pide la política",
+           "R07": "su caso necesita la revisión de un asesor antes de cualquier oferta"},
+    "pt": {"R01": "sua conta não está ativa",
+           "R02": "seu relacionamento com o banco é recente (a política pede pelo menos {min_tenure} meses)",
+           "R03": "há pagamentos em atraso em um crédito",
+           "R04": "um dos seus produtos está bloqueado ou suspenso",
+           "R06_SCORE_BELOW_MIN": "sua pontuação de crédito está abaixo do mínimo exigido pela política",
+           "R07": "seu caso precisa da revisão de um consultor antes de qualquer oferta"},
+}
+
+
+def decline_why(codes: list[str], lang: str, min_tenure: str) -> str:
+    """Texto con los motivos conocidos (hasta dos); vacio si ninguno tiene texto."""
+    texts = []
+    for code in codes:
+        text = DECLINE_WHY[lang].get(code) or DECLINE_WHY[lang].get(code.split("_")[0])
+        if text and text not in texts:
+            texts.append(text.format(min_tenure=min_tenure))
+    return join_list(texts[:2], lang) if texts else ""
 SUMMARY_LABELS = {
     "es": [("product", "Producto"), ("amount", "Monto"), ("months_text", "Plazo"), ("rate", "Tasa anual"),
            ("payment", "Cuota mensual estimada"), ("dti_text", "Endeudamiento con la cuota"), ("status", "Estado"),

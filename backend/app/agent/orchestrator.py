@@ -41,6 +41,7 @@ DEFAULT_REWRITE_KINDS = frozenset({"thanks", "closing", "goodbye", "unknown", "a
 EMPATHY_EVERY_N_TURNS = 3
 CONCLUSIVE_OK = (eng.ELIGIBLE, eng.ELIGIBLE_PROVISIONAL)
 # "no paga ninguna" a la pregunta de las cuotas de la persona del hogar = 0
+_INSTALLMENTS = re.compile(r"\b(cuotas?|paga|pago|debe|deudas?|parcelas?|deve|dividas?)\b")
 _NO_DEBT = re.compile(r"\b(ningun[ao]?|nada|nenhum[a]?|zero|cero)\b")
 # Otra persona del hogar en la respuesta ("mi esposa gana..."). Sin ella, "gano X" es el ingreso del propio cliente.
 _THIRD_PARTY = re.compile(r"\b(espos[oa]|marido|mujer|pareja|novi[oa]|companheir[oa]|conyuge|hij[oa]|filh[oa]|herman[oa]|"
@@ -119,7 +120,7 @@ def validate_nlu(nlu: NLUResult, message: str) -> NLUResult:
 
 
 # Respuestas que presentan cifras de una oferta: la interfaz las encabeza con el aviso de simulacion.
-OFFER_KINDS = frozenset({"offers", "offer_featured", "offer_featured_card", "offer_proactive", "offer_proactive_card",
+OFFER_KINDS = frozenset({"offers", "offers_declared", "offer_featured", "offer_featured_card", "offer_proactive", "offer_proactive_card",
                          "eligible", "eligible_card", "eligible_provisional", "eligible_card_provisional"})
 
 
@@ -252,6 +253,11 @@ class Orchestrator:
         if awaiting == "income" and amounts and intent in ("unknown", "update_income"):
             nlu = nlu.model_copy(update={"intent": "update_income", "declared_income": amounts[0]})
             intent = "update_income"
+        elif awaiting == "income" and intent in ("unknown", "confirm_yes") and session.slots.get("reasked") != "income":
+            session.slots.update(reasked="income", awaiting="income")      # una sola vez: despues sigue el flujo general
+            facts = self._facts("ask_income", intent, awaiting="income", ccy=get_profile(ctx)["local_currency"])
+            facts["pre"] = ["reask_number"]
+            return facts
 
         session.unknown_streak = session.unknown_streak + 1 if intent == "unknown" else 0
 
@@ -377,9 +383,12 @@ class Orchestrator:
             return self._facts("fx_unavailable", "update_income", awaiting="income", ccy=err)
         self._declared(session)["income"] = inc
         session.slots["declared_income_conv"] = conv
+        session.slots.pop("reasked", None)                       # llego la cifra: se puede volver a repreguntar
         if session.slots.get("pending_request", {}).get("product"):
             # recalculo inmediato con el dato nuevo; sin monto, la opcion mas alta del producto que ya pidio
             return self._evaluate(session, ctx, "update_income")
+        if session.slots.get("offers_shown"):                    # ya vio el listado: se lo muestro recalculado
+            return self._offers(session, ctx)
         return self._facts("income_saved", "update_income", income=self._m(session, inc, profile["local_currency"]),
                            fx=self._fx_note(session))
 
@@ -403,7 +412,9 @@ class Orchestrator:
             {"type": "featured_offers", "policy_version": self.policy.version,
              "options": [{k: o[k] for k in ("option_code", "term_months", "offer_rate_pct", "offer_max_amount_usd")}
                          for o in offers.ordered]})
-        return self._facts("offers", "credit_offers", outcome="offers", lines=templates.join_list(lines, lang))
+        session.slots["offers_shown"] = True
+        kind = "offers_declared" if self._declared(session).get("income") is not None else "offers"
+        return self._facts(kind, "credit_offers", outcome="offers", lines=templates.join_list(lines, lang))
 
     def _proactive_accepted(self, session: Session, ctx: ToolContext, intent: str) -> dict:
         """'Si' a la oferta proactiva: se pide el monto, con lo mas alto como referencia (y como respuesta a un 'si')."""
@@ -504,7 +515,9 @@ class Orchestrator:
         if q.outcome == eng.DECLINED and "R06_SCORE_MISSING" in q.reasons and len(q.reasons) == 1:
             return self._offer_handoff(session, "MISSING_DATA", intent, kind="needs_data_score", outcome=q.outcome)
         if q.outcome == eng.DECLINED:
-            return self._offer_handoff(session, "POLICY_DECLINED", intent, kind="declined_generic", outcome=q.outcome)
+            why = templates.decline_why(q.reasons, lang, str(self.policy.params.get("min_tenure_months", "")))
+            return self._offer_handoff(session, "POLICY_DECLINED", intent, kind="declined_reason" if why else "declined_generic",
+                                       outcome=q.outcome, why=why)
 
         # Elegible, pero no para ese plazo o monto
         max_age = str(self.policy.params.get("max_age_at_maturity_years", ""))
@@ -553,12 +566,20 @@ class Orchestrator:
             if not amounts:
                 if intent == "confirm_no":
                     return self._after_household(session, "household_none", intent)
+                if intent in ("unknown", "confirm_yes") and session.slots.get("reasked") != awaiting:
+                    session.slots.update(reasked=awaiting, awaiting=awaiting)   # una sola vez
+                    facts = self._facts("ask_household_income", intent, awaiting=awaiting, ccy=ccy)
+                    facts["pre"] = ["reask_number"]
+                    return facts
                 return None
             value, conv, err = self._to_local(session, ctx, amounts[0], mention)
             if err:
                 session.slots["awaiting"] = "household_income"
                 return self._facts("fx_unavailable", intent, awaiting="household_income", ccy=err)
             session.slots["household_pending"] = {"income": value}
+            session.slots.pop("reasked", None)
+            if len(amounts) > 1 and _INSTALLMENTS.search(norm(message)):   # trajo tambien sus cuotas
+                return self._household_answer(session, ctx, "household_debt", intent, message, amounts[1:], mention)
             session.slots["awaiting"] = "household_debt"
             return self._facts("ask_household_debt", intent, awaiting="household_debt")
         # household_debt
@@ -811,12 +832,12 @@ class Orchestrator:
 
     # ------------------------------------------------------------------ derivacion
     def _offer_handoff(self, session: Session, reason: str, intent: str, kind: str = "needs_review",
-                       outcome: str | None = None) -> dict:
+                       outcome: str | None = None, **fmt: str) -> dict:
         """Pide confirmacion antes de derivar (la accion se ejecuta solo con un 'si' explicito)."""
         session.slots["awaiting"] = "confirm_handoff"
         session.slots["handoff_reason"] = reason
         text = templates.REASON_TEXT[session.language].get(reason, "")
-        return self._facts(kind, intent, outcome=outcome, awaiting="confirm_handoff", suggest="yes_no", reason=text)
+        return self._facts(kind, intent, outcome=outcome, awaiting="confirm_handoff", suggest="yes_no", reason=text, **fmt)
 
     def _handoff(self, session: Session, reason: str) -> dict:
         if session.handoff:
