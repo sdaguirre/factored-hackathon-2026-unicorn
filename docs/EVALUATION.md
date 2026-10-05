@@ -75,6 +75,24 @@ un snapshot local) y la inyección con muchas variantes contra el modelo real.
 - **Credit policy 0.4 in gold** (Databricks, 150,000 customers, cutoff 2026-06-30): 50,707 eligible (33.8%), 24,953 with a
   proactive offer and 25,754 only if the customer asks. The Python reference implementation
   (`data/policy/credit_policy.py`) matches gold on all 1,800,000 options (`data/scripts/check_engine_parity.py`).
+- **Age-at-maturity cap (policy 0.4), bias check by age bracket** (`data/databricks/analysis/age_cap_impact.sql`,
+  eligible customers, 2026-06-30 cutoff). Age only caps loan terms; eligibility, amounts and rates do not depend on it,
+  and every bracket keeps its card offer. "Lost to age": no option of that product and at least one term cut only by
+  the cap.
+
+  | Age | Eligible | With personal loan | With mortgage | Personal loan lost to age | Mortgage lost to age | Mortgage shortened by age |
+  |---|---|---|---|---|---|---|
+  | 18-29 | 7,088 | 6,375 | 7,040 | 0 | 0 | 0 |
+  | 30-39 | 8,060 | 7,219 | 7,986 | 0 | 0 | 0 |
+  | 40-49 | 8,143 | 7,256 | 8,064 | 0 | 4 | 1,444 |
+  | 50-59 | 8,096 | 7,231 | 8,020 | 0 | 61 | 6,564 |
+  | 60-64 | 4,026 | 3,615 | 64 | 0 | 3,962 | 64 |
+  | 65-69 | 4,038 | 3,607 | 0 | 0 | 4,038 | 0 |
+  | 70-74 | 4,095 | 2,212 | 0 | 1,747 | 4,095 | 0 |
+  | 75+ | 7,161 | 0 | 0 | 7,161 | 7,161 | 0 |
+
+  The effect is by design and concentrated from age 60 (mortgages) and 70 (personal loans). It is a disclosed policy
+  trade-off (life-insurance practice), not a model bias; the advisor can review exceptions.
 - **Data pipeline quality:** 90 metrics per run in `pipeline_quality_metrics`; 0 key duplicates and 0 content duplicates
   except 6 repeated `product_number` values; gold built on the typed silver is identical to the previous one, customer by
   customer. Update fixture (static data): 5 of 5 cases handled correctly, and the assertions fail without the delivery.

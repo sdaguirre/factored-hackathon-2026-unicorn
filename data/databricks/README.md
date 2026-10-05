@@ -206,8 +206,10 @@ all options; see `docs/ENGINE_ALIGNMENT.md` for the backend changes.
   A run on the test schemas must give the same numbers.
 - Main reasons for no offer: missing income 30,033 (recoverable by asking the customer),
   blocked or suspended product 25,519, missing score 22,492, inactive customer 22,300.
-- Band term limits: eligible customers without any personal loan option dropped from 10,772
-  (policy 0.2 grid) to 5,319; no option exceeds the band maximum term or the 20% capacity.
+- Term limits: eligible customers without any personal loan option went from 10,772 (policy 0.2
+  grid) to 5,319 with the band limits of 0.3, and to 13,192 with the age-at-maturity cap of 0.4.
+  No option exceeds the maximum term or the 20% capacity. Impact by age bracket:
+  `analysis/age_cap_impact.sql` (results in `docs/EVALUATION.md`).
 - SQL and Python annuity results match (40,000 USD at 6.2% over 180 months: 341.88 per month).
 - Building the profile, options and checks takes about 50 seconds on the serverless starter
   warehouse; with `as_of_date=2026-05-31` it yields 50,110 eligible customers.

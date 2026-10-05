@@ -133,3 +133,11 @@ def test_featured_mortgage_tie_at_the_maximum_goes_to_the_shortest_term():
 
 def test_no_featured_option_without_availability():
     assert featured(offer_options(profile(is_eligible=False, reason_codes=["R03_DELINQUENCY"]), POLICY)) == {}
+
+
+def test_term_cut_by_age_has_its_own_reason():
+    # Band C allows mortgages up to 300 months; at 58 the age cap leaves 204 months.
+    opts = offer_options(profile(max_term_mortgage_months=204), POLICY)
+    assert option(opts, "MG", 180)["is_available"]
+    assert option(opts, "MG", 240)["unavailable_reason"] == "term_above_age_at_maturity"
+    assert option(opts, "MG", 360)["unavailable_reason"] == "term_above_band_maximum"

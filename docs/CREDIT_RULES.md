@@ -77,8 +77,10 @@ terms. Credit cards always have the 5-year card term.
 **Age at maturity (new in 0.4).** A personal loan or mortgage must end before the customer turns
 `max_age_at_maturity_years` = 75 (`ref_policy_params`), as banks usually require for life
 insurance on the loan. The maximum term is the band maximum capped by the months left until
-that age (`customer_credit_profile.max_term_by_age_months`); a term above it is unavailable
-(`term_above_band_maximum`). Examples: at 58, mortgages up to 15 years and personal loans up to
+that age (`customer_credit_profile.max_term_by_age_months`). A term the band allows but the age
+cap does not is unavailable with its own reason, `term_above_age_at_maturity`, so the agent can
+tell the customer why ("the loan would end after age 75"); a term above the band maximum keeps
+`term_above_band_maximum`. Examples: at 58, mortgages up to 15 years and personal loans up to
 the band maximum; at 72, personal loans up to 36 months and no mortgage. Cards have no age cap.
 When the birth date is missing there is no cap and the advisor verifies age.
 
