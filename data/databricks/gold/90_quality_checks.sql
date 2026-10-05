@@ -119,6 +119,55 @@ checks AS (
         SELECT 'customer_cashflow_summary', count(*), count(DISTINCT customer_id)
         FROM IDENTIFIER(:gold_schema || '.customer_cashflow_summary')
     )
+
+    -- 10. Contract with the API: the columns and types the backend and data/policy/credit_policy.py
+    --     read from the profile and the offer options (documented in data/databricks/README.md).
+    --     A renamed, dropped or retyped column fails the run here instead of breaking the agent.
+    UNION ALL
+    SELECT e.table_name, 'contract_violations', CAST(count_if(c.column_name IS NULL) AS DOUBLE), '= 0',
+           CASE WHEN count_if(c.column_name IS NULL) = 0 THEN 'ok' ELSE 'fail' END
+    FROM (VALUES
+        ('customer_credit_profile', 'customer_id', 'string'), ('customer_credit_profile', 'is_eligible', 'boolean'),
+        ('customer_credit_profile', 'offer_mode', 'string'), ('customer_credit_profile', 'not_proactive_reason', 'string'),
+        ('customer_credit_profile', 'reason_codes', 'array<string>'),
+        ('customer_credit_profile', 'requires_advisor_review', 'boolean'),
+        ('customer_credit_profile', 'can_become_eligible_with_declared_income', 'boolean'),
+        ('customer_credit_profile', 'risk_band', 'string'), ('customer_credit_profile', 'segment', 'string'),
+        ('customer_credit_profile', 'local_currency', 'string'), ('customer_credit_profile', 'fx_to_usd', 'double'),
+        ('customer_credit_profile', 'fx_date', 'date'), ('customer_credit_profile', 'income_used_usd', 'double'),
+        ('customer_credit_profile', 'income_source', 'string'),
+        ('customer_credit_profile', 'current_installments_usd', 'double'),
+        ('customer_credit_profile', 'max_total_installment_usd', 'double'),
+        ('customer_credit_profile', 'available_installment_usd', 'double'),
+        ('customer_credit_profile', 'total_rate_adjustment_pp', 'double'),
+        ('customer_credit_profile', 'max_term_personal_loan_months', 'int'),
+        ('customer_credit_profile', 'max_term_mortgage_months', 'int'),
+        ('customer_credit_profile', 'open_complaints', 'bigint'),
+        ('customer_credit_profile', 'open_priority_complaints', 'bigint'),
+        ('customer_credit_profile', 'open_critical_complaints', 'bigint'),
+        ('customer_credit_profile', 'as_of_date', 'date'), ('customer_credit_profile', 'policy_version', 'string'),
+        ('customer_credit_offer_options', 'customer_id', 'string'), ('customer_credit_offer_options', 'option_code', 'string'),
+        ('customer_credit_offer_options', 'product_code', 'string'), ('customer_credit_offer_options', 'product_type', 'string'),
+        ('customer_credit_offer_options', 'tier', 'string'), ('customer_credit_offer_options', 'term_months', 'int'),
+        ('customer_credit_offer_options', 'offer_rate_pct', 'double'),
+        ('customer_credit_offer_options', 'option_min_amount_usd', 'int'),
+        ('customer_credit_offer_options', 'option_max_amount_usd', 'int'),
+        ('customer_credit_offer_options', 'is_available', 'boolean'),
+        ('customer_credit_offer_options', 'unavailable_reason', 'string'),
+        ('customer_credit_offer_options', 'offer_mode', 'string'),
+        ('customer_credit_offer_options', 'offer_max_amount_usd', 'bigint'),
+        ('customer_credit_offer_options', 'offer_monthly_installment_usd', 'double'),
+        ('customer_credit_offer_options', 'offer_max_amount_local', 'double'),
+        ('customer_credit_offer_options', 'offer_monthly_installment_local', 'double'),
+        ('customer_credit_offer_options', 'local_currency', 'string'),
+        ('customer_credit_offer_options', 'fx_to_usd', 'double')
+    ) AS e(table_name, column_name, data_type)
+    LEFT JOIN IDENTIFIER(split_part(:gold_schema, '.', 1) || '.information_schema.columns') c
+      ON c.table_schema = split_part(:gold_schema, '.', 2)
+     AND c.table_name = e.table_name
+     AND c.column_name = e.column_name
+     AND lower(c.full_data_type) = e.data_type
+    GROUP BY e.table_name
 )
 SELECT r.run_id, r.run_at, 'gold', c.table_name, c.metric, c.value, c.threshold, c.status
 FROM checks c CROSS JOIN run r;
