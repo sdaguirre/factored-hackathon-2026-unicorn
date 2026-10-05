@@ -43,9 +43,12 @@ HUMAN_REQUEST = _HUMAN  # peticion EXPLICITA de hablar con una persona; el LLM n
 _INCOME = re.compile(r"\b(gano|ganamos|ganho|cobro|sueldo|salario|ingresos?|renda|rendimento)\b")
 _CREDIT = re.compile(r"(credit|prestamo|prestad|prestar|emprestimo|emprestad|emprestar|financiar|financiamento|hipotec)")
 _OFFER_BASE = (r"oferta|proposta|preaprob|pre-aprov|preaprov|\btasas?\b|\btaxas?\b|juros|intereses?|"
-               r"cuanto (me|puedo)|quanto (posso|eu)|limite|capacidad|capacidade")
+               r"cuanto (me|puedo)|quanto (posso|eu)|limite|capacidad|capacidade|creditos? disponibles?|creditos? disponive|"
+               r"credito disponivel")
 _OFFERS = re.compile(rf"({_OFFER_BASE}|que (creditos|productos))")
 _OFFER_SIGNALS = re.compile(rf"({_OFFER_BASE})")      # lo que de verdad pregunta por ofertas ("que productos" es ambiguo)
+_NEED = re.compile(r"\b(necesito|ocupo|preciso|me hace falta|me falta)\b")
+_HOME = re.compile(r"\bcomprar (una |uma |mi |minha )?(casa|vivienda|depa|departamento|apartamento|imovel)\b")
 _GREET = re.compile(r"^(hola|buenas|buenos|hello|hi|ola|oi|bom dia|boa tarde|boa noite|buen dia)\b")
 _THANKS = re.compile(r"(gracias|agradezco|obrigad|valeu|agradeco)")
 _CLOSING = re.compile(r"(adios|hasta luego|chao|eso es todo|nada mas|es todo|ya esta todo|tchau|ate logo|isso e tudo|"
@@ -111,6 +114,13 @@ class MockNLU:
         if _INCOME.search(t) and amounts:
             return NLUResult(intent="update_income", declared_income=amounts[0], **base)
         words = t.split()
+        product = _product(t)
+        # 2. "no gracias, adios": a farewell wins over a bare "no" when nothing is pending
+        if not yes_no_pending and _CLOSING.search(t) and (_NO.match(t) or _THANKS.search(t)):
+            return NLUResult(intent="closing", **base)
+        # 4. "me interesa la tarjeta": interest in a named product is a request for it, not a bare "yes"
+        if product and _YES.match(t) and not yes_no_pending:
+            return NLUResult(intent="credit_eligibility", product=product, **base)
         # con una pregunta de si/no pendiente, respuestas algo mas largas ("no gracias") siguen siendo confirmaciones
         limit = 6 if yes_no_pending else 4
         if len(words) <= limit and _YES.match(t):
@@ -125,6 +135,10 @@ class MockNLU:
         # preaprobado?" si pregunta por ofertas.
         if _ACCOUNT.search(t) and not _OFFER_SIGNALS.search(t) and not (_WANT.search(t) and _CREDIT.search(t)):
             return NLUResult(intent="account_inquiry", **base)
+        if _HOME.search(t):
+            return NLUResult(intent="credit_eligibility", product="mortgage", amount=amounts[0] if amounts else None, **base)
+        if amounts and _NEED.search(t) and not _INCOME.search(t):
+            return NLUResult(intent="credit_eligibility", product=product or "personal_loan", amount=amounts[0], **base)
         if amounts and _CREDIT.search(t):
             return NLUResult(intent="credit_eligibility", product=_product(t) or "personal_loan", amount=amounts[0], **base)
         if _OFFERS.search(t):

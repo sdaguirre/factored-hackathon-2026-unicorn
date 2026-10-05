@@ -17,9 +17,9 @@ def norm(text: str) -> str:
 _PT = re.compile(r"\b(quero|preciso|emprestimo|emprestar|voce|voces|obrigad[oa]|gostaria|ola|oi|nao|meu|minha|salario|ganho|"
                  r"bom dia|boa tarde|boa noite|falar|atendente|cartao|cartoes|juros|taxa|valor|reais|renda|financiamento|sim|"
                  r"quais|qual|sao|tenho|algum|alguma|mim|aprovado|posso|pode|quanto|muito|isso|estou|parcela|parcelas|prazo|"
-                 r"tambem|conta|agora|ate|pegar|fiz|alguem)\b")
+                 r"tambem|conta|agora|ate|pegar|fiz|alguem|foi|ontem|numa|loja|comprei|obrigada)\b")
 _ES = re.compile(r"\b(quiero|necesito|prestamo|prestar|prestan|usted|ustedes|gracias|hola|buenas|buenos|mi|sueldo|gano|tengo|"
-                 r"tasa|monto|plata|hablar|agente|ingreso|ingresos|tarjeta|si|dolares|pesos|cuales|cual|cuanto|aprobado|"
+                 r"tasa|monto|plata|hablar|agente|ingreso|ingresos|tarjeta|si|cuales|cual|cuanto|aprobado|"
                  r"preaprobados?|puedo|puede|pueden|muy|eso|estoy|cuota|cuotas|plazo|tambien|cuenta|ahora|hasta|cobraron|"
                  r"reconozco|algo)\b")
 
