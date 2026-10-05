@@ -42,7 +42,8 @@ EMPATHY_EVERY_N_TURNS = 3
 CONCLUSIVE_OK = (eng.ELIGIBLE, eng.ELIGIBLE_PROVISIONAL)
 # "no paga ninguna" a la pregunta de las cuotas de la persona del hogar = 0
 _INSTALLMENTS = re.compile(r"\b(cuotas?|paga|pago|debe|deudas?|parcelas?|deve|dividas?)\b")
-_NO_DEBT = re.compile(r"\b(ningun[ao]?|nada|nenhum[a]?|zero|cero)\b")
+_NO_DEBT = re.compile(r"\b(ningun[ao]?|nada|nenhum[a]?|zero|cero|no paga|nao paga|sin cuotas|sem parcelas|"
+                      r"no tiene cuotas|nao tem parcelas)\b")
 # Otra persona del hogar en la respuesta ("mi esposa gana..."). Sin ella, "gano X" es el ingreso del propio cliente.
 _THIRD_PARTY = re.compile(r"\b(espos[oa]|marido|mujer|pareja|novi[oa]|companheir[oa]|conyuge|hij[oa]|filh[oa]|herman[oa]|"
                           r"irma[o]?|madre|padre|mae|pai|mama|papa|suegr[oa]|sogr[oa]|ella|ele|essa pessoa|esa persona|"
@@ -238,7 +239,7 @@ class Orchestrator:
             reply = self._docs_answer(session, ctx, awaiting, intent)
             if reply is not None:
                 return reply
-        if awaiting == "amount" and amounts and intent in ("unknown", "credit_eligibility", "confirm_yes"):
+        if awaiting == "amount" and amounts and intent in ("unknown", "credit_eligibility", "confirm_yes", "credit_offers"):
             nlu = nlu.model_copy(update={"intent": "credit_eligibility", "amount": amounts[0]})
             intent = "credit_eligibility"
         elif awaiting == "amount" and intent == "confirm_yes" and session.slots.get("pending_request", {}).get("featured_amount"):
@@ -253,6 +254,16 @@ class Orchestrator:
             facts = self._facts("ask_income", intent, awaiting="income", ccy=get_profile(ctx)["local_currency"])
             facts["pre"] = ["reask_number"]
             return facts
+
+        pending = session.slots.get("pending_request") or {}
+        months_only = parse_months(message) or nlu.months
+        if intent == "unknown" and months_only and pending.get("product"):
+            pending.update(months=months_only, amount=None, conv=None)    # otro plazo: la oferta mas alta a ese plazo
+            session.slots["pending_request"] = pending
+            return self._evaluate(session, ctx, "credit_eligibility")
+        # 2. a "no" with no question pending (after seeing offers, for example): acknowledge, do not say "I did not understand"
+        if intent == "confirm_no" and not awaiting:
+            return self._facts("no_thanks", intent, suggest="start")
 
         session.unknown_streak = session.unknown_streak + 1 if intent == "unknown" else 0
 
@@ -565,6 +576,8 @@ class Orchestrator:
             session.slots.pop("reasked", None)
             if len(amounts) > 1 and _INSTALLMENTS.search(norm(message)):   # trajo tambien sus cuotas
                 return self._household_answer(session, ctx, "household_debt", intent, message, amounts[1:], mention)
+            if _NO_DEBT.search(norm(message)):                             # "...y no paga cuotas": cuotas 0
+                return self._household_answer(session, ctx, "household_debt", intent, message, [], mention)
             session.slots["awaiting"] = "household_debt"
             return self._facts("ask_household_debt", intent, awaiting="household_debt")
         # household_debt

@@ -69,6 +69,10 @@ T: dict[str, dict[str, str | list[str]]] = {
                "Perdão, não consegui entender bem. Quer ver suas ofertas de crédito ou que eu conecte você a um consultor?"],
     },
     # ---------------------------------------------------------------- temas que no son de credito: a un asesor
+    "no_thanks": {
+        "es": "Entendido, sin problema. Si más adelante quiere ver otra opción de crédito o hablar con un asesor, aquí estoy.",
+        "pt": "Entendido, sem problema. Se mais adiante quiser ver outra opção de crédito ou falar com um consultor, estou aqui.",
+    },
     "non_credit": {
         "es": "Ese tema lo atiende un asesor, que puede ver el detalle de sus productos y casos. Si quiere, cuénteme qué necesita y lo dejo anotado para que no tenga que repetirlo. ¿Lo conecto ahora?",
         "pt": "Esse assunto é atendido por um consultor, que pode ver o detalhe dos seus produtos e casos. Se quiser, me conte o que precisa e eu deixo anotado para que você não precise repetir. Conecto você agora?",
