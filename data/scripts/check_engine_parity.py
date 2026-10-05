@@ -1,6 +1,6 @@
 """Checks that an offer engine reproduces gold customer_credit_offer_options exactly.
 
-Reads the export of data/scripts/export_gold.py (.local/gold/) and, for each customer profile,
+Reads the gold export downloaded by data/scripts/export_gold.py (.local/gold/) and, for each customer profile,
 compares the engine options with gold on availability, maximum amount, rate and installment.
 It also checks that recalculate() with no declared data leaves every option unchanged.
 
@@ -37,6 +37,12 @@ def load_engine(spec: str | None):
     return getattr(importlib.import_module(module), name)
 
 
+def read_table(src: Path, name: str) -> pd.DataFrame:
+    """The Databricks export is a folder per table; a single <name>.parquet file also works."""
+    folder = src / name
+    return pd.read_parquet(folder if folder.is_dir() else src / f"{name}.parquet")
+
+
 def same(a, b) -> bool:
     if a is None or (isinstance(a, float) and math.isnan(a)):
         return b is None or (isinstance(b, float) and math.isnan(b))
@@ -51,8 +57,8 @@ def main(args):
     engine = load_engine(args.engine)
     policy = load_policy()
     src = Path(args.gold_dir)
-    profiles = pd.read_parquet(src / "customer_credit_profile.parquet")
-    gold = pd.read_parquet(src / "customer_credit_offer_options.parquet")
+    profiles = read_table(src, "customer_credit_profile")
+    gold = read_table(src, "customer_credit_offer_options")
     if args.sample:
         ids = random.Random(7).sample(list(profiles.customer_id), args.sample)
         profiles = profiles[profiles.customer_id.isin(ids)]
