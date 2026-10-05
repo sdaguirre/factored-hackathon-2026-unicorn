@@ -233,11 +233,11 @@ metrics AS (
                CASE WHEN count_if(estimated_monthly_income IS NULL) / count(*) <= 0.25 THEN 'ok' ELSE 'fail' END AS status
         FROM IDENTIFIER(:silver_schema || '.customers')
         UNION ALL
-        -- birth date drives the age-at-maturity term cap (policy 0.4): missing means no cap
+        -- birth date drives the age-at-maturity term cap (policy 0.4): missing means no cap, which
+        -- changes the offers, so above the threshold the run fails (measured share: 0.0)
         SELECT 'customers' AS table_name, 'null_share_date_of_birth' AS metric,
-               round(count_if(date_of_birth IS NULL) / count(*), 4) AS value, '<= 0.01 ok, <= 0.05 warn' AS threshold,
-               CASE WHEN count_if(date_of_birth IS NULL) / count(*) <= 0.01 THEN 'ok'
-                    WHEN count_if(date_of_birth IS NULL) / count(*) <= 0.05 THEN 'warn' ELSE 'fail' END AS status
+               round(count_if(date_of_birth IS NULL) / count(*), 4) AS value, '<= 0.01' AS threshold,
+               CASE WHEN count_if(date_of_birth IS NULL) / count(*) <= 0.01 THEN 'ok' ELSE 'fail' END AS status
         FROM IDENTIFIER(:silver_schema || '.customers')
         UNION ALL
         SELECT 'daily_exchange_rates' AS table_name, 'null_share_exchange_rate' AS metric,

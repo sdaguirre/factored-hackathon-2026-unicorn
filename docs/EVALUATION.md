@@ -95,7 +95,7 @@ un snapshot local) y la inyección con muchas variantes contra el modelo real.
 
   There is no "unknown" row: no customer is missing a birth date at this cutoff (0 of 150,000 in silver), so the cap
   applies to everyone. A missing birth date would mean no cap; silver measures `null_share_date_of_birth` on every run
-  (warn above 1%, fail above 5%) so a jump in missing birth dates cannot silently remove the cap. The effect is by design
+  and fails above 1%, so a jump in missing birth dates cannot silently remove the cap. The effect is by design
   and concentrated from age 60 (mortgages) and 70 (personal loans): a disclosed policy trade-off (life-insurance
   practice), not a model bias; the advisor can review exceptions.
 - **Data pipeline quality:** 94 metrics per run (80 bronze/silver, 14 gold) in `pipeline_quality_metrics`; 0 key duplicates and 0 content duplicates
