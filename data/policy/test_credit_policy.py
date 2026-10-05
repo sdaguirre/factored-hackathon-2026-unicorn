@@ -110,3 +110,26 @@ def test_accepting_more_than_the_option_allows_is_rejected():
     with pytest.raises(ValueError):
         build_credit_offer(offer_id="o-3", profile=profile(), option=pl24, amount_usd=9000, policy=POLICY,
                            flags=[], offer_origin="proactive", created_at=datetime(2026, 6, 30))
+
+
+def featured(opts):
+    return {o["product_code"]: (o["option_code"], o["term_months"], o["offer_max_amount_usd"])
+            for o in opts if o["is_featured"]}
+
+
+def test_featured_option_is_the_highest_per_product():
+    # Worked example: longest personal loan term of band C, the only card tier within capacity.
+    f = featured(offer_options(profile(), POLICY))
+    assert f["PL"] == ("PL", 48, 12700) and f["CC"][0] == "CC-CLA"
+
+
+def test_featured_mortgage_tie_at_the_maximum_goes_to_the_shortest_term():
+    opts = offer_options(profile(income_used_usd=30_000.0, available_installment_usd=5_900.0), POLICY)
+    capped = [o["term_months"] for o in opts if o["product_code"] == "MG" and o["offer_max_amount_usd"] == 150_000]
+    assert len(capped) > 1
+    assert featured(opts)["MG"] == ("MG", min(capped), 150_000)
+    assert featured(opts)["CC"][0] == "CC-BLK"
+
+
+def test_no_featured_option_without_availability():
+    assert featured(offer_options(profile(is_eligible=False, reason_codes=["R03_DELINQUENCY"]), POLICY)) == {}

@@ -1,12 +1,13 @@
 """Checks that an offer engine reproduces gold customer_credit_offer_options exactly.
 
 Reads the gold export downloaded by data/scripts/export_gold.py (.local/gold/) and, for each customer profile,
-compares the engine options with gold on availability, maximum amount, rate and installment.
+compares the engine options with gold on availability, maximum amount, rate, installment and
+the featured option.
 It also checks that recalculate() with no declared data leaves every option unchanged.
 
 The engine is any function `fn(profile: dict, policy) -> list[dict]` returning dicts with
-option_code, term_months, is_available, offer_max_amount_usd, offer_rate_pct and
-offer_monthly_installment_usd. Default: the reference implementation in data/policy.
+option_code, term_months, is_available, offer_max_amount_usd, offer_rate_pct,
+offer_monthly_installment_usd and is_featured. Default: the reference implementation in data/policy.
 
 Usage:
     python data/scripts/check_engine_parity.py                       # reference engine, all customers
@@ -78,7 +79,8 @@ def main(args):
             ok = (bool(o["is_available"]) == bool(g.is_available)
                   and same(o["offer_max_amount_usd"], g.offer_max_amount_usd)
                   and same(o["offer_rate_pct"], g.offer_rate_pct)
-                  and same(o["offer_monthly_installment_usd"], g.offer_monthly_installment_usd))
+                  and same(o["offer_monthly_installment_usd"], g.offer_monthly_installment_usd)
+                  and bool(o.get("is_featured")) == bool(g.is_featured))
             if not ok:
                 mismatches += 1
                 if len(examples) < 5:

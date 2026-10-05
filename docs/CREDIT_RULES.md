@@ -141,6 +141,16 @@ agent may use them:
 
 `credit_offers.offer_origin` records which case led to each accepted offer.
 
+**What to present first: always the highest.** Per product, the agent leads with one available
+option (`customer_credit_offer_options.is_featured`); the others stay as alternatives if the
+customer asks for a lower installment or another term:
+- credit card: the highest available tier;
+- personal loan and mortgage: the highest amount, which is usually the longest term the band
+  allows. When several terms reach the product maximum (150,000 USD), the shortest of them wins:
+  lower rate and less total interest for the same amount.
+
+A product with no available option has no featured option.
+
 ## 8. Accepted offers and advisor handoff
 When the customer accepts, the API writes one row to `gold.credit_offers`: offer parameters
 in USD and local currency, exchange rate, income used and its source, current installments,
