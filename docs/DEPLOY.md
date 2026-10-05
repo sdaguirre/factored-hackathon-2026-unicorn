@@ -18,7 +18,12 @@ merge a main ─► CI (verde) ─► Deploy ─► git archive | ssh (clave res
 - **La clave de CI solo ejecuta `chat-deploy`** (`restrict,command="/usr/local/bin/chat-deploy"` en `authorized_keys`):
   sin shell, sin pty, sin reenvíos. El script es de root; la clave no puede modificarlo. El script (`deploy/chat-deploy.sh`)
   solo acepta un SHA de 40 caracteres y no imprime variables de entorno ni logs de la aplicación (el log del Action es público).
-- **Se conservan en el servidor** `.env`, `backend/.env`, `docker-compose.override.yml` y `.local/` (secretos y ofertas aceptadas).
+- **Se conservan en el servidor** `.env`, `backend/.env`, `docker-compose.override.yml`, `.expected_data_source`, `backend/data/snapshot` y `.local/`
+  (secretos, ofertas aceptadas y snapshot de datos).
+- **No se da por bueno un deploy que cambie la fuente de datos.** Tras levantar, el script compara `data_source` de
+  `/v1/meta` con lo esperado: el contenido de `/home/deploy/app/.expected_data_source` (`organizer_snapshot` o `team_fixture`)
+  o, si no existe, lo que servía la VM antes de desplegar. Si no coincide, revierte. Así un snapshot perdido no hace caer
+  la demo al conjunto inventado sin avisar (`config.py` hace ese cambio en silencio cuando falta `customers.parquet`).
 - Solo se despliega desde un `push` a `main` del propio repositorio (no desde PR ni forks) y se omite un commit si `main`
   ya avanzó. Un deploy a la vez (`concurrency`).
 - Registro en el servidor: `/home/deploy/deploy.log`. Commit en producción: `/home/deploy/app/.deployed_sha`.
@@ -52,6 +57,20 @@ lanzar a mano desde Actions > Deploy > Run workflow (solo sobre `main`).
          - "127.0.0.1:8080:8080"
    ```
 3. `mkdir -p .local/offers && chown 10001:10001 .local/offers` (el contenedor es de solo lectura y escribe ahí).
+   **Snapshot de gold** (sin él la demo usa `data/fixture`, 21 clientes inventados): generarlo en una máquina con el export
+   (`python backend/scripts/build_snapshot.py --gold-only`, ver `docs/DATA.md`), copiar `backend/data/snapshot/` a
+   `/home/deploy/app/.local/snapshot/` (directorio 755, parquet 644) y montarlo en el `docker-compose.override.yml`:
+   ```yaml
+   services:
+     chat-backend:
+       volumes:
+         - ./.local/snapshot:/data/snapshot:ro
+       environment:
+         CHAT_DATA_DIR: /data/snapshot
+   ```
+   Luego `echo organizer_snapshot > /home/deploy/app/.expected_data_source` y `docker compose up -d`. Cada export gold nuevo
+   exige regenerar y volver a copiar el snapshot, y reiniciar el backend. Las ofertas aceptadas (`.local/offers`) se
+   sincronizan aparte con `backend/scripts/sync_credit_offers.py`.
 4. Instalar el script como root: `install -o root -g root -m 755 deploy/chat-deploy.sh /usr/local/bin/chat-deploy`.
 5. Añadir la clave pública de CI a `/home/deploy/.ssh/authorized_keys`:
    `restrict,command="/usr/local/bin/chat-deploy" ssh-ed25519 AAAA… github-actions-deploy`

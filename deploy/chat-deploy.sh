@@ -2,14 +2,16 @@
 # Comando forzado de la clave de GitHub Actions (restrict,command="/usr/local/bin/chat-deploy").
 #   stdin                = tar del repositorio (git archive) del commit a desplegar
 #   SSH_ORIGINAL_COMMAND = SHA de 40 caracteres de ese commit
-# Conserva .env, backend/.env, docker-compose.override.yml y .local/ (secretos y datos del servidor).
+# Conserva .env, backend/.env, docker-compose.override.yml y .local/ (secretos, ofertas y snapshot de datos del servidor),
+# y no da por bueno un deploy que cambie la fuente de datos (/v1/meta data_source): ver healthy().
 # No imprime variables de entorno ni logs de la aplicacion: la salida va al log publico del workflow.
 set -euo pipefail
 
 APP=/home/deploy/app
 PREV=/home/deploy/app.prev
 LOG=/home/deploy/deploy.log
-KEEP=(--exclude='/.env' --exclude='/backend/.env' --exclude='/docker-compose.override.yml' --exclude='/.local' --exclude='/.deployed_sha')
+KEEP=(--exclude='/.env' --exclude='/backend/.env' --exclude='/docker-compose.override.yml' --exclude='/.local' --exclude='/.deployed_sha'
+      --exclude='/.expected_data_source' --exclude='/backend/data/snapshot')
 
 log() { echo "$(date -u +%FT%TZ) $*" | tee -a "$LOG"; }
 
@@ -26,9 +28,21 @@ for f in docker-compose.yml backend/Dockerfile frontend/Dockerfile backend/requi
   [ -f "$STAGE/$f" ] || { log "deploy $SHA: archivo incompleto (falta $f), no se toca nada"; exit 4; }
 done
 
+meta_source() {
+  curl -fsS -m 10 http://127.0.0.1:8080/v1/meta 2>/dev/null | grep -o '"data_source":"[^"]*"' | cut -d'"' -f4
+}
+
+# Fuente de datos esperada: el archivo opcional .expected_data_source (organizer_snapshot | team_fixture) o, si no existe,
+# la que tenia la VM antes de desplegar. Sin esto, un snapshot perdido haria caer la demo al conjunto inventado sin error.
+EXPECTED=$(tr -d '[:space:]' 2>/dev/null < "$APP/.expected_data_source" || true)
+[ -n "$EXPECTED" ] || EXPECTED=$(meta_source || true)
+
 healthy() {
-  curl -fsS -m 10 -o /dev/null http://127.0.0.1:8080/ \
-    && curl -fsS -m 10 -o /dev/null http://127.0.0.1:8080/v1/meta
+  curl -fsS -m 10 -o /dev/null http://127.0.0.1:8080/ || return 1
+  curl -fsS -m 10 -o /dev/null http://127.0.0.1:8080/v1/meta || return 1
+  [ -z "$EXPECTED" ] && return 0
+  local now; now=$(meta_source || true)
+  [ "$now" = "$EXPECTED" ] || { log "deploy $SHA: la fuente de datos es '${now:-?}' y se esperaba '$EXPECTED'"; return 1; }
 }
 
 cd "$APP"
@@ -56,6 +70,6 @@ done
 if docker compose up -d --no-build --wait --wait-timeout 120 >>"$LOG" 2>&1 && healthy; then
   log "deploy $SHA: version anterior restaurada"
 else
-  log "deploy $SHA: la version anterior tampoco responde, revisar el servidor"
+  log "deploy $SHA: la version anterior tampoco pasa la comprobacion (servicio o fuente de datos), revisar el servidor"
 fi
 exit 1
