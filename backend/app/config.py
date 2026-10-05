@@ -20,7 +20,10 @@ class Settings(BaseSettings):
 
     env: str = "dev"
     data_dir: Path = BASE_DIR / "data" / "snapshot"
-    policy_path: Path = BASE_DIR / "policy" / "credit_policy.yaml"
+    # Reglas del agente (documentos, atributos protegidos). La politica de credito es la de referencia (app/policy/engine.py).
+    rules_path: Path = BASE_DIR / "policy" / "agent_rules.yaml"
+    # Ofertas aceptadas (filas de gold credit_offers) en JSONL; scripts/sync_credit_offers.py las sube a Databricks.
+    offers_path: Path = Path(tempfile.gettempdir()) / "chat-offers" / "credit_offers.jsonl"
     # Fecha "hoy" del dataset (el ultimo dia de datos). Las preguntas de seguridad se calculan respecto a ella.
     as_of_date: date = date(2026, 6, 17)
 

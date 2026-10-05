@@ -3,8 +3,9 @@
 Dos caminos distintos que NO deben mezclarse:
 - Reactivo: el cliente pide un credito -> se evalua su elegibilidad. NO mira el consentimiento de marketing.
 - Proactivo (este modulo): se ofrece por iniciativa del banco. Exige TODAS estas condiciones:
-    1. el cliente acepta marketing (accepts_marketing);
-    2. esta preaprobado por la politica con datos del banco (no con ingreso declarado en el chat);
+    1. gold lo marca como `offer_mode = proactive`: elegible con datos del banco (no con lo declarado en el chat), acepta
+       marketing y no tiene un reclamo critico abierto (politica 0.4, seccion 7);
+    2. tiene una opcion disponible; se presenta la destacada (la mas alta): prestamo personal, si no tarjeta, si no hipoteca;
     3. el momento es adecuado: sin sentimiento negativo, sin tema delicado (fraude, disputa, queja) y sin
        rechazo previo en la sesion;
     4. no se ofrecio ya en esta sesion ni el cliente dijo que no;
@@ -22,11 +23,11 @@ from dataclasses import dataclass, field
 
 from app.agent import templates
 from app.agent.context import blocks_proactive_offer
-from app.agent.tools import DEFAULT_MONTHS, ToolContext, get_profile, offer_rates
+from app.agent.tools import ToolContext, get_offers, get_profile, to_local
 from app.core.fmt import fmt_money, fmt_pct
 from app.core.sessions import Session
 from app.logging_setup import log
-from app.policy import credit_engine as ce
+from app.policy import engine as eng
 
 logger = logging.getLogger(__name__)
 
@@ -62,27 +63,32 @@ def decide(session: Session, ctx: ToolContext) -> OfferDecision:
     if blocks_proactive_offer(slots.get("context") or {}):
         return _no(OPEN_CASE)
     last = slots.get("last_evaluation")
-    if last and last["outcome"] in (ce.DECLINED, ce.NEEDS_REVIEW, ce.NEEDS_DATA):
+    if last and last["outcome"] in (eng.DECLINED, eng.NEEDS_DATA, eng.UNAVAILABLE):
         return _no(RECENT_DECLINE)
-    if last and last["outcome"] in (ce.ELIGIBLE, ce.ELIGIBLE_PROVISIONAL):
+    if last and last["outcome"] in (eng.ELIGIBLE, eng.ELIGIBLE_PROVISIONAL):
         return _no("ALREADY_EVALUATED")      # ya tiene una propuesta: se le resume, no se le ofrece otra
 
     profile = get_profile(ctx)
-    if not profile["accepts_marketing"]:
-        return _no(NO_CONSENT)
+    if profile.get("offer_mode") != "proactive":
+        return _no(NO_CONSENT if profile.get("not_proactive_reason") == "no_marketing_consent" else
+                   OPEN_CASE if profile.get("not_proactive_reason") == "open_critical_complaint" else NOT_PREAPPROVED)
 
-    info = offer_rates(ctx)          # solo datos del banco: nunca el ingreso declarado en el chat
-    probe = info["probe"].decision
-    if probe.outcome != ce.ELIGIBLE or not info["rates"] or not probe.max_amount or probe.max_amount <= 0:
+    offers = get_offers(ctx, record=False)   # solo datos del banco: nunca lo declarado en el chat
+    if not offers.ordered:
         return _no(NOT_PREAPPROVED)
+    best = offers.ordered[0]
+    product = eng.PRODUCT_NAME[best["product_code"]]
+    get_offers(ctx)                           # la consulta que respalda la oferta queda en la evidencia del turno
 
-    lang, ccy = session.language, info["ccy"]
-    fmt = {"first_name": session.first_name or "", "max_amount": fmt_money(probe.max_amount, ccy, 0),
-           "months": str(DEFAULT_MONTHS["personal_loan"]), "rate": fmt_pct(info["rates"]["personal_loan"]),
-           "product": templates.PRODUCT_NAME[lang]["personal_loan"]}
-    evidence = {"product": "personal_loan", "indicative_max_amount": round(probe.max_amount, 2),
-                "rate_pct": round(info["rates"]["personal_loan"], 2), "band": probe.band,
-                "policy_version": probe.policy_version, "basis": "bank_data_only"}
+    lang, ccy = session.language, profile["local_currency"]
+    top = to_local(profile, best["offer_max_amount_usd"], floor=True)
+    fmt = {"first_name": session.first_name or "", "max_amount": fmt_money(top, ccy, 0),
+           "months": str(best["term_months"]), "rate": fmt_pct(best["offer_rate_pct"]),
+           "product": templates.product_label(product, best["tier"], lang)}
+    evidence = {"product": product, "option_code": best["option_code"], "term_months": best["term_months"],
+                "indicative_max_amount": best["offer_max_amount_usd"], "indicative_max_amount_local": top, "ccy": ccy,
+                "rate_pct": best["offer_rate_pct"], "band": profile.get("risk_band"),
+                "policy_version": profile.get("policy_version"), "basis": "bank_data_only"}
     log(logger, "proactive_decision", reason=OK, make=True)
     return OfferDecision(True, OK, fmt, evidence)
 

@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.core import sessions as sessions_mod
 from app.main import create_app
-from tests.conftest import correct_answers, hdr, login, make_settings, open_session, pick_customers
+from tests.conftest import correct_answers, hdr, login, make_settings, open_session, pick_customers, within_offer
 
 
 def say(client, sid, h, text, language=None):
@@ -18,10 +18,16 @@ def say(client, sid, h, text, language=None):
     return r.json()
 
 
+def _options(state, cid):
+    from app.agent.tools import ToolContext, get_offers
+
+    return get_offers(ToolContext(cid, state.repo, state.policy), record=False).options
+
+
 def _eligible_customer(state):
     ok, _ = pick_customers(state)
     r = ok.iloc[0]
-    return r.document_number, float(r.monthly_income)
+    return r.document_number, float(r.income)
 
 
 # ---------------------------------------------------------------- autenticacion
@@ -115,36 +121,35 @@ def test_validation_errors_do_not_echo_input(client):
 # ---------------------------------------------------------------- conversacion y politica
 
 def test_eligible_path_in_spanish_with_local_number_format(client, state):
-    doc, income = _eligible_customer(state)
+    doc, cid, amount, months = within_offer(state, "personal_loan")
     sid, h = login(client, state, doc)
-    amount = f"{int(income * 0.3):,}".replace(",", ".")      # 1.234 estilo es/pt
-    r = say(client, sid, h, f"quiero un préstamo de {amount} a 24 meses")
+    text = f"{int(amount):,}".replace(",", ".")              # 1.234 estilo es/pt
+    r = say(client, sid, h, f"quiero un préstamo de {text} a {months} meses")
     assert r["intent"] == "credit_eligibility"
-    assert r["outcome"] in ("eligible", "declined") and r["language"] == "es"
-    if r["outcome"] == "eligible":
-        assert "simulación" in r["reply"] and "24" in r["reply"]
+    assert r["outcome"] == "eligible" and r["language"] == "es"
+    assert "simulación" in r["reply"] and str(months) in r["reply"]
 
 
 def test_dti_exceeded_then_declared_income_recalculates_as_provisional(client, state):
     doc, income = _eligible_customer(state)
     sid, h = login(client, state, doc)
-    big = int(income * 6)
+    big = int(income * 12)                                    # la cuota pasaria del 20% del ingreso a cualquier plazo
     r1 = say(client, sid, h, f"necesito un préstamo de {big} a 36 meses")
-    assert r1["outcome"] == "declined"                       # cuota > 20% del ingreso
-    r2 = say(client, sid, h, f"ahora gano {int(income * 1.4)} al mes")   # +40%: no supera el +50% sin revision
+    assert r1["outcome"] in ("declined", "unavailable")
+    r2 = say(client, sid, h, f"ahora gano {int(income * 3)} al mes")
     assert r2["intent"] == "update_income"
-    assert r2["outcome"] in ("eligible_provisional", "declined")
+    assert r2["outcome"] in ("eligible_provisional", "declined", "unavailable")
     if r2["outcome"] == "eligible_provisional":
-        assert "verificación" in r2["reply"]
+        assert "verificar" in r2["reply"]
 
 
-def test_declared_income_far_above_file_goes_to_human_review(client, state):
+def test_declared_income_far_above_file_is_a_conditional_offer_not_a_review(client, state):
+    """Politica 0.4: el ingreso declarado reemplaza al registrado y la oferta queda condicional (F03); ya no hay un tope de
+    aumento que mande a revision humana."""
     doc, income = _eligible_customer(state)
     sid, h = login(client, state, doc)
     r = say(client, sid, h, f"gano {int(income * 5)} al mes")
-    assert r["awaiting"] == "confirm_handoff"
-    r2 = say(client, sid, h, "sí")
-    assert r2["handoff_ticket"] and r2["outcome"] == "handed_off"
+    assert r["awaiting"] is None and r["handoff_ticket"] is None and "verificación" in r["reply"]
 
 
 def test_missing_income_asks_then_computes_provisionally(client, state):
@@ -156,7 +161,7 @@ def test_missing_income_asks_then_computes_provisionally(client, state):
     r = say(client, sid, h, "quiero un préstamo de 3000")
     assert r["awaiting"] == "income"
     r2 = say(client, sid, h, "gano 5000")
-    assert r2["outcome"] in ("eligible_provisional", "declined")
+    assert r2["outcome"] in ("eligible_provisional", "declined", "unavailable")
 
 
 def test_portuguese_conversation_answers_in_portuguese(client, state):
@@ -167,24 +172,26 @@ def test_portuguese_conversation_answers_in_portuguese(client, state):
     assert any(w in r["reply"] for w in ("empréstimo", "parcela", "elegível", "endividamento", "consultor"))
 
 
-def test_unsupported_product_requires_confirmation_before_handoff(client, state):
-    doc, _ = _eligible_customer(state)
+def test_credit_card_is_offered_by_tier_starting_with_the_highest(client, state):
+    """Politica 0.4: la tarjeta ya no se deriva; se ofrece por nivel y se presenta primero el mas alto disponible."""
+    doc, cid, _, _ = within_offer(state, "credit_card")
     sid, h = login(client, state, doc)
     r = say(client, sid, h, "quiero una tarjeta de crédito")
-    assert r["awaiting"] == "confirm_handoff" and r["handoff_ticket"] is None   # aun no se ejecuta la accion
+    assert r["outcome"] == "offer" and r["awaiting"] == "amount" and r["handoff_ticket"] is None
+    star = next(o for o in _options(state, cid) if o["product_code"] == "CC" and o["is_featured"])
+    tier = {"Classic": "Clásica"}.get(star["tier"], star["tier"])
+    assert f"tarjeta de crédito {tier}" in r["reply"] and "cupo" in r["reply"]
     assert client.get(f"/v1/sessions/{sid}/handoff", headers=h).status_code == 404
-    r2 = say(client, sid, h, "sí")
-    assert r2["handoff_ticket"]
 
 
 def test_handoff_summary_has_verified_facts_actions_and_open_questions(client, state):
     doc, income = _eligible_customer(state)
     sid, h = login(client, state, doc)
-    say(client, sid, h, f"necesito un préstamo de {int(income * 6)}")
+    say(client, sid, h, f"necesito un préstamo de {int(income * 12)}")
     r = say(client, sid, h, "quiero hablar con un asesor")
     summary = client.get(f"/v1/sessions/{sid}/handoff", headers=h).json()
     assert summary["ticket_id"] == r["handoff_ticket"]
-    assert summary["evaluation"]["outcome"] == "declined" and summary["evaluation"]["policy_version"]
+    assert summary["evaluation"]["outcome"] in ("declined", "unavailable") and summary["evaluation"]["policy_version"] == "0.4"
     types = [a["type"] for a in summary["actions_taken"]]
     assert summary["verified_facts"] and types == ["credit_evaluation", "handoff_created"]
     assert summary["open_questions"] and summary["transcript_tail"]

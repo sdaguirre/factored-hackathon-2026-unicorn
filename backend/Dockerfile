@@ -7,14 +7,19 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /srv
 
-COPY requirements.txt .
+# Contexto de construccion: la raiz del repositorio (docker-compose.yml). Lo que entra lo fija /.dockerignore.
+COPY backend/requirements.txt .
 RUN pip install -r requirements.txt
 
-COPY app ./app
-COPY policy ./policy
+COPY backend/app ./app
+COPY backend/policy ./policy
 # data/fixture (conjunto de ejemplo del equipo) siempre; data/snapshot solo existe en la maquina de quien lo genero.
 # En otros entornos se monta un volumen y se fija CHAT_DATA_DIR.
-COPY data ./data
+COPY backend/data ./data
+# Politica de credito 0.4: implementacion de referencia y parametros, los mismos que usa gold (app/policy/engine.py).
+COPY data/policy/credit_policy.py /srv/credit_policy/policy/credit_policy.py
+COPY data/reference/ /srv/credit_policy/reference/
+ENV CHAT_POLICY_DIR=/srv/credit_policy
 
 RUN useradd --system --uid 10001 --no-create-home appuser
 USER appuser

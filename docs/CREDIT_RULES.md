@@ -1,8 +1,7 @@
 # Credit rules (synthetic, policy version 0.4)
 
-> Policy 0.4 is the reference version of the credit rules. Earlier components
-> (`backend/policy/credit_policy.yaml`, gold views) were built on preliminary versions so the
-> team could move in parallel; they are aligned to this version in follow-up PRs.
+> Policy 0.4 is the reference version of the credit rules. Gold and the backend chat agent
+> (`backend/app/policy/engine.py`) both apply it through `data/policy/credit_policy.py`.
 
 These rules produce **indicative pre-approved offers** for marketing and lead generation.
 No offer is final: every customer who wants to proceed is handed off to an advisor, who

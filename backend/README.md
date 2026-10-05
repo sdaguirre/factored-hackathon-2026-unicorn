@@ -113,8 +113,9 @@ de intentos y el bloqueo.
 - **LLM** (opcional): extrae intención y datos a un esquema canónico en español y puede reescribir la respuesta
   para sonar más natural. No decide, no calcula, no ejecuta acciones.
 - **Código**: contrasta montos y plazos con el texto original, interpreta formatos numéricos es/pt, aplica la
-  política (`policy/credit_policy.yaml` + `app/policy/credit_engine.py`) y ejecuta las herramientas.
-- **Herramientas**: ninguna recibe `customer_id`; el contexto lo fija la sesión autenticada.
+  política de crédito 0.4 (`app/policy/engine.py`, ver "Política de crédito") y ejecuta las herramientas.
+- **Herramientas**: ninguna recibe `customer_id`; el contexto lo fija la sesión autenticada. Las de crédito son
+  `get_offers()`, `recalculate_offer(...)` y `accept_offer(...)` (`app/agent/tools.py`).
 - **Acciones con confirmación**: derivar a un humano solo ocurre tras un "sí" explícito (o si el cliente lo pide).
 - **Respuesta del LLM**: se descarta si contiene números que no están en los hechos calculados.
 - **Resumen de derivación**: solicitud, evaluación con versión de política, hechos verificados, acciones, preguntas
@@ -169,6 +170,46 @@ léxico no la cubría; se amplió el léxico, pero **esa corrección se hizo mir
 es limpia**. Detección de tema sensible (reglas): 2/2 en el reservado y 9/10 en desarrollo, 0 falsos positivos. Límites: muestra
 pequeña, etiquetas de un solo anotador (el equipo debe revisarlas), y las dos corridas del modelo difieren en una frase.
 
+## Política de crédito
+
+El backend aplica la **política 0.4** ([`docs/CREDIT_RULES.md`](../docs/CREDIT_RULES.md)), la misma que calcula gold en
+Databricks. No reimplementa las reglas: `app/policy/engine.py` carga la implementación de referencia
+(`data/policy/credit_policy.py`) y sus parámetros (`data/reference/*.csv`), y solo traduce una solicitud del chat a una opción
+de la grilla. Con el export de gold, el motor del backend coincide en las 1.800.000 opciones:
+
+```bash
+python data/scripts/export_gold.py --profile <perfil>                       # export de gold -> .local/gold/
+python data/scripts/check_engine_parity.py --engine app.policy.engine:offer_options --pythonpath backend
+```
+
+- **Datos.** El perfil de crédito es la fila de gold `customer_credit_profile` del cliente (USD), en
+  `credit_profile.parquet` (`scripts/build_snapshot.py --gold-only` lo toma del export; `scripts/make_fixture.py` lo
+  genera para el conjunto del equipo). Las opciones se recalculan en memoria, idénticas a gold.
+- **Reglas.** Bandas A–E con ajuste por segmento; tasa de la grilla por plazo o nivel de tarjeta; plazo máximo por banda y,
+  desde 0.4, por edad al vencimiento (el crédito termina antes de los 75 años; el backend nunca ve la fecha de nacimiento:
+  gold entrega `max_term_*` ya recortados); límite del 20% sin margen; tarjeta de crédito por nivel (Clásica, Gold,
+  Platinum, Black). Un plazo rechazado por edad se explica distinto que uno rechazado por la banda: el motivo sale de
+  `unavailable_reason` de la opción (`term_above_age_at_maturity`), el mismo de gold.
+- **Versión.** Al arrancar se compara la `policy_version` del perfil (export de gold) con la de `data/reference`: si no
+  coinciden, en `CHAT_ENV=dev` solo avisa y fuera de dev no arranca (un perfil 0.3 ofrecería plazos sin el tope por edad).
+- **Lo más alto primero.** Sin monto, el asistente propone la opción destacada (`is_featured` de gold) y pregunta cuánto
+  necesita; «sí» toma ese máximo. «¿Qué ofertas tengo?» muestra la destacada de cada producto.
+- **Datos declarados.** Si el cliente dice su ingreso, reemplaza al registrado y la oferta queda **condicional** (`F03`): ya
+  no hay un tope de aumento que mande a revisión. Tras el primer resultado se pregunta **a todos por igual** si alguien más
+  del hogar aporta ingresos; si sí, se piden su ingreso y sus cuotas (el ingreso del hogar entra con su deuda). Si el
+  cliente no sabe esas cuotas, el ingreso no se suma y el asesor lo completa.
+- **Monedas.** La política trabaja en USD (`fx_to_usd` del perfil); el cliente ve y escribe montos en su moneda local.
+  Los máximos se muestran redondeados hacia abajo para que, convertidos de vuelta, no pasen del tope.
+- **Oferta aceptada.** «Sí» a avanzar llama a `accept_offer`: recalcula (nunca toma cifras del texto), valida monto y 20%,
+  agrega `F02`/`F03`/`F04` y escribe la fila de gold `credit_offers` en `CHAT_OFFERS_PATH` (JSONL). Al derivar, la fila se
+  reescribe con `status = handed_off` y el ticket. `scripts/sync_credit_offers.py` sube las filas a Databricks con `MERGE`
+  por `offer_id` (sin `--apply` solo muestra lo que subiría), así el contenedor no necesita credenciales. Con Docker
+  Compose el archivo vive en `.local/offers/` del host (volumen, ignorado por git) y sobrevive a los reinicios:
+  `python backend/scripts/sync_credit_offers.py --file .local/offers/credit_offers.jsonl --gold-schema
+  workspace.gold_latam_bank_test --apply --profile <perfil> --warehouse-id <id>` (probarlo primero en `_test`).
+- **Reglas del agente** (`policy/agent_rules.yaml`): documentos por producto (y los de la persona del hogar si se sumó su
+  ingreso) y atributos protegidos. `date_of_birth` solo se usa, en gold, para el tope de plazo por edad.
+
 ## Oferta proactiva de crédito
 
 El chat ofrece un crédito por iniciativa del banco solo al **cerrar la conversación** ("gracias", "eso es todo"), y solo
@@ -178,11 +219,12 @@ Es una decisión en código (`app/agent/proactive.py`); el LLM solo redacta el m
 
 | Camino | Qué mira | Qué NO mira |
 |---|---|---|
-| **Reactivo**: el cliente pide un crédito, tasas o su capacidad | Política de crédito con datos del banco (y el ingreso que declare, como provisional) | `accepts_marketing` |
+| **Reactivo**: el cliente pide un crédito, tasas o su capacidad | Política de crédito con datos del banco (y lo que declare, como oferta condicional) | `accepts_marketing` |
 | **Proactivo**: el banco ofrece | Todo lo siguiente a la vez (abajo) | El ingreso declarado en el chat |
 
-Se ofrece solo si se cumplen **todas**: el cliente acepta marketing; está preaprobado por la política con datos del
-banco; no hubo sentimiento negativo ni tema delicado (fraude, disputa, reclamo, tarjeta robada, cargo no reconocido) en
+Se ofrece solo si se cumplen **todas**: gold lo marca como `offer_mode = proactive` (elegible con datos del banco, acepta
+marketing y sin reclamo crítico abierto) y tiene una opción disponible, que se presenta empezando por lo más alto
+(préstamo personal; si no, tarjeta; si no, hipoteca); no hubo sentimiento negativo ni tema delicado (fraude, disputa, reclamo, tarjeta robada, cargo no reconocido) en
 la sesión; no se le rechazó una solicitud en la sesión; y no se ofreció ya ni dijo que no. Además **no le queda nada
 pendiente**: ni un tema de soporte en esta conversación, ni una derivación, ni un caso **crítico** abierto, ni un caso
 abierto en los últimos 180 días. Si acepta, entra al flujo normal de elegibilidad; si rechaza, no se repite. La oferta
@@ -220,10 +262,10 @@ un léxico simple en modo `mock`, no un modelo.
 
 - **Moneda.** El código (`app/agent/money.py`) detecta la moneda que menciona el cliente (USD, MXN, COP, ARS; «pesos» sin
   país se interpreta en la moneda del cliente). Convierte con la tabla de tipos de cambio del dataset (última fecha
-  disponible, triangulando por USD: **no es una cotización en vivo**) y evalúa la política siempre en la moneda del ingreso;
-  el mensaje muestra ambos montos con la misma tasa. BRL y EUR se informan como no soportadas en vez de inventar una tasa.
+  disponible, triangulando por USD: **no es una cotización en vivo**) a la moneda local del cliente; la política la pasa a
+  USD con `fx_to_usd` del perfil de gold. El mensaje muestra ambos montos con la misma tasa. BRL y EUR se informan como no soportadas en vez de inventar una tasa.
 - **Solicitud.** Tras una evaluación favorable el asistente pregunta si quiere avanzar. Si acepta, calcula los documentos
-  que exige la política (`required_documents` en `credit_policy.yaml`), resta los que el banco ya tiene (`docs_on_file`,
+  que exigen las reglas del agente (`required_documents` en `policy/agent_rules.yaml`), resta los que el banco ya tiene (`docs_on_file`,
   sintético) y pide uno por uno solo los que faltan. El chat **no recibe archivos**: el cliente confirma que los tiene y
   el asesor los verifica. Con todo en orden se deriva a un asesor con el resumen; si falta algo, se le dice qué.
 - **Cierre.** Al despedirse o llamar a `POST /end`, el asistente resume la oferta y avisa que el detalle llegará por correo

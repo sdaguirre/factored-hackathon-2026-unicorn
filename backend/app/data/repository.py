@@ -1,5 +1,9 @@
 """Acceso a datos del prototipo. Lee un snapshot parquet (capa gold exportada).
 
+El perfil de credito es la fila de gold customer_credit_profile (USD, politica 0.4) del cliente: credit_profile.parquet,
+tomado del export de gold (scripts/build_snapshot.py) o generado por el equipo (scripts/make_fixture.py). Las opciones de
+oferta no se guardan: se recalculan en memoria con la politica de referencia, identicas a gold (app/policy/engine.py).
+
 La interfaz `CustomerRepository` es el punto de reemplazo: en produccion seria un SQL Warehouse
 con filtros por fila; el resto del sistema no cambia.
 """
@@ -11,6 +15,8 @@ from pathlib import Path
 from typing import Protocol
 
 import pandas as pd
+
+from app.policy.engine import clean_profile
 
 
 @dataclass(frozen=True)
@@ -75,6 +81,8 @@ class SnapshotRepository:
         self._branches = pd.read_parquet(data_dir / "branches.parquet")
         self._tx = pd.read_parquet(data_dir / "transactions.parquet")
         self._by_doc = {str(r.document_number): r.customer_id for r in self._customers.itertuples()}
+        self._credit = {r["customer_id"]: clean_profile(r)
+                        for r in pd.read_parquet(data_dir / "credit_profile.parquet").to_dict("records")}
         self._cust = self._customers.set_index("customer_id")
         self._branch_city = dict(zip(self._branches.branch_id, self._branches.city))
         self._branch_country = dict(zip(self._branches.branch_id, self._branches.country))
@@ -104,20 +112,14 @@ class SnapshotRepository:
         return Customer(cid, r.document_type, str(r.document_number), r.first_name, r.country,
                         r.segment, r.customer_status)
 
+    def policy_versions(self) -> set[str]:
+        """Versiones de politica con que gold calculo los perfiles cargados (deben ser la de data/reference)."""
+        return {str(p.get("policy_version")) for p in self._credit.values()}
+
     def credit_profile(self, customer_id: str) -> dict:
-        r = self._cust.loc[customer_id]
-        return {
-            "customer_status": r.customer_status,
-            "credit_score": _clean(r.credit_score),
-            "monthly_income": _clean(r.monthly_income),
-            "existing_monthly_debt": _clean(r.existing_monthly_debt) or 0.0,
-            "max_days_past_due": int(_clean(r.max_days_past_due) or 0),
-            "n_active_products": int(_clean(r.n_active_products) or 0),
-            "income_ccy": r.income_ccy,
-            "country": r.country,
-            # Consentimiento de marketing: SOLO gobierna ofertas proactivas, nunca la respuesta a una solicitud del cliente.
-            "accepts_marketing": bool(r.accepts_marketing),
-        }
+        """Fila de gold customer_credit_profile (montos en USD). Incluye accepts_marketing: el consentimiento SOLO gobierna
+        las ofertas proactivas (offer_mode), nunca la respuesta a una solicitud del cliente."""
+        return dict(self._credit[customer_id])
 
     def products(self, customer_id: str) -> list[dict]:
         g = self._prod_by_c.get(customer_id)

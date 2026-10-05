@@ -2,15 +2,16 @@
 
 Flujo por turno:  mensaje -> NLU (LLM o reglas) -> validacion en codigo -> accion/herramienta/politica
                   -> hechos verificados -> texto (plantilla es/pt, opcionalmente reescrito por el LLM).
-El LLM nunca decide: la elegibilidad sale de app.policy.credit_engine y las acciones, de tools.py.
+El LLM nunca decide: la elegibilidad sale de la politica 0.4 (app.policy.engine, la misma de gold) y las acciones, de
+tools.py. Montos: la politica trabaja en USD; el cliente ve y escribe montos en su moneda local.
 """
 from __future__ import annotations
 
+import json
 import logging
+import math
 import re
 from dataclasses import dataclass, field
-
-import json
 
 from app.agent import documents, money, proactive, support, templates
 from app.agent.evidence import build_evidence
@@ -18,13 +19,14 @@ from app.agent.handoff import build_summary
 from app.agent.language import norm, parse_amounts, parse_months
 from app.agent.llm import LLM, MockLLM
 from app.agent.nlu import HUMAN_REQUEST, NLUResult
-from app.agent.tools import (DEFAULT_MONTHS, SUPPORTED_PRODUCTS, HandoffQueue, ToolContext, evaluate_credit,
-                             get_customer_context, get_profile, new_ticket_id, offer_rates, utc_iso)
+from app.agent.tools import (HandoffQueue, ToolContext, accept_offer, get_customer_context, get_offers, get_profile,
+                             new_ticket_id, recalculate_offer, to_local, utc_iso)
 from app.core.fmt import fmt_money, fmt_pct
+from app.core.offers import OfferStore
 from app.core.pdf import render_summary_pdf
 from app.core.sessions import Session
 from app.logging_setup import log
-from app.policy import credit_engine as ce
+from app.policy import engine as eng
 
 logger = logging.getLogger(__name__)
 MAX_REPLY_CHARS = 1200
@@ -37,6 +39,13 @@ DEFAULT_REWRITE_KINDS = frozenset({"thanks", "closing", "goodbye", "unknown", "a
                                    "other_topic", "incident", "detail_noted", "handoff_declined_support", "case_skip"})
 # Casos de soporte en curso: el cliente esta contando algo y la derivacion espera su confirmacion
 EMPATHY_EVERY_N_TURNS = 3
+CONCLUSIVE_OK = (eng.ELIGIBLE, eng.ELIGIBLE_PROVISIONAL)
+# "no paga ninguna" a la pregunta de las cuotas de la persona del hogar = 0
+_NO_DEBT = re.compile(r"\b(ningun[ao]?|nada|nenhum[a]?|zero|cero)\b")
+# Otra persona del hogar en la respuesta ("mi esposa gana..."). Sin ella, "gano X" es el ingreso del propio cliente.
+_THIRD_PARTY = re.compile(r"\b(espos[oa]|marido|mujer|pareja|novi[oa]|companheir[oa]|conyuge|hij[oa]|filh[oa]|herman[oa]|"
+                          r"irma[o]?|madre|padre|mae|pai|mama|papa|suegr[oa]|sogr[oa]|ella|ele|essa pessoa|esa persona|"
+                          r"gana|ganha)\b")
 
 
 @dataclass
@@ -108,9 +117,10 @@ def validate_nlu(nlu: NLUResult, message: str) -> NLUResult:
 
 
 class Orchestrator:
-    def __init__(self, repo, policy: dict, llm: LLM, queue: HandoffQueue,
-                 rewrite_kinds: frozenset[str] = DEFAULT_REWRITE_KINDS, outbox=None):
-        self.repo, self.policy, self.llm, self.queue, self.outbox = repo, policy, llm, queue, outbox
+    def __init__(self, repo, policy: eng.Policy, rules: dict, llm: LLM, queue: HandoffQueue,
+                 rewrite_kinds: frozenset[str] = DEFAULT_REWRITE_KINDS, outbox=None, offers: OfferStore | None = None):
+        self.repo, self.policy, self.rules, self.llm, self.queue, self.outbox = repo, policy, rules, llm, queue, outbox
+        self.offers = offers
         self.rewrite_kinds = rewrite_kinds
         self._fallback = MockLLM()
 
@@ -121,7 +131,7 @@ class Orchestrator:
             session.language = nlu.language
         lang = session.language
         session.history.append({"role": "user", "text": message})
-        ctx = ToolContext(session.customer_id, self.repo, self.policy)
+        ctx = ToolContext(session.customer_id, self.repo, self.policy, self.offers)
         if nlu.sentiment == "negative" or nlu.sensitive_topic:
             session.slots["no_offers"] = True  # en toda la sesion: ninguna oferta comercial
         session.slots.setdefault("sentiments", []).append(nlu.sentiment or "neutral")   # curva de animo para el resumen del asesor
@@ -148,7 +158,7 @@ class Orchestrator:
             session.slots["empathy_turn"] = turn
 
     def _understand(self, session: Session, message: str) -> NLUResult:
-        pending = session.slots.get("awaiting") in ("confirm_handoff", "offer_interest")  # hay una pregunta de si/no
+        pending = session.slots.get("awaiting") in ("confirm_handoff", "offer_interest", "household")  # pregunta de si/no
         try:
             nlu = self.llm.extract(message, session.language, pending)
         except Exception as exc:  # fallo de red, JSON invalido, etc.: respaldo por reglas
@@ -186,13 +196,21 @@ class Orchestrator:
                 return self._collect_detail(session, message)
         if awaiting == "offer_interest":
             if intent == "confirm_yes":
-                session.slots["pending_request"] = {"product": "personal_loan", "amount": None,
-                                                    "months": DEFAULT_MONTHS["personal_loan"]}
-                session.slots["awaiting"] = "amount"
-                return self._facts("offer_accepted", intent, awaiting="amount", months=str(DEFAULT_MONTHS["personal_loan"]))
+                return self._proactive_accepted(session, ctx, intent)
             if intent == "confirm_no":
                 session.slots["offer_declined"] = True
                 return self._facts("offer_declined", intent)
+        if awaiting in ("household", "household_income", "household_debt"):
+            reply = self._household_answer(session, ctx, awaiting, intent, message, amounts, mention)
+            if reply is not None:
+                return reply
+        if awaiting == "term":
+            months = parse_months(message) or nlu.months
+            if months is None and amounts and amounts[0] == int(amounts[0]) and amounts[0] <= 360:
+                months = int(amounts[0])                         # "48" a secas, en respuesta a "¿qué plazo prefiere?"
+            if months is not None and intent in ("unknown", "credit_eligibility", "confirm_yes"):
+                session.slots["pending_request"]["months"] = months
+                return self._evaluate(session, ctx, "credit_eligibility")
         if awaiting == "proceed":
             if intent == "confirm_yes":
                 return self._start_application(session, ctx)
@@ -206,6 +224,10 @@ class Orchestrator:
         if awaiting == "amount" and amounts and intent in ("unknown", "credit_eligibility", "confirm_yes"):
             nlu = nlu.model_copy(update={"intent": "credit_eligibility", "amount": amounts[0]})
             intent = "credit_eligibility"
+        elif awaiting == "amount" and intent == "confirm_yes" and session.slots.get("pending_request", {}).get("featured_amount"):
+            req = session.slots["pending_request"]                # "si" al maximo propuesto
+            req.update(amount=req["featured_amount"], conv=None)
+            return self._evaluate(session, ctx, "credit_eligibility")
         if awaiting == "income" and amounts and intent in ("unknown", "update_income"):
             nlu = nlu.model_copy(update={"intent": "update_income", "declared_income": amounts[0]})
             intent = "update_income"
@@ -249,7 +271,8 @@ class Orchestrator:
         session.slots["awaiting"] = "offer_interest"
         session.actions.append({"type": "proactive_offer_made", "verified": True, **d.evidence})
         session.slots.setdefault("verified_facts", []).append({"type": "proactive_offer", **d.evidence})
-        facts["kind2"] = "offer_proactive"
+        session.slots["offer_product"] = d.evidence["product"]
+        facts["kind2"] = "offer_proactive_card" if d.evidence["product"] == "credit_card" else "offer_proactive"
         facts["fmt"].update(d.fmt)
         facts.update(awaiting="offer_interest", suggest="yes_no", proactive_offer=True)
         return facts
@@ -300,109 +323,253 @@ class Orchestrator:
         session.actions.append({"type": "customer_detail_noted", "notes": len(case["notes"]), "verified": False})
         return self._facts("detail_noted", "unknown", awaiting="confirm_handoff", suggest="yes_no")
 
-    # ------------------------------------------------------------------ casos
+    # ------------------------------------------------------------------ credito (politica 0.4)
+    def _declared(self, session: Session) -> dict:
+        return session.slots.setdefault("declared", {})
+
     def _eligibility(self, session: Session, ctx: ToolContext, nlu: NLUResult, mention: money.CurrencyMention) -> dict:
         pending = session.slots.get("pending_request") or {}
         product = nlu.product or pending.get("product") or "personal_loan"
-        if product not in SUPPORTED_PRODUCTS:
-            return self._offer_handoff(session, "UNSUPPORTED_PRODUCT", "credit_eligibility", kind="unsupported_product")
-        months = nlu.months or DEFAULT_MONTHS[product]
-        conv = pending.get("conv") if pending.get("product") == product else None
+        same = pending.get("product") == product
+        months = None if product == "credit_card" else (nlu.months or (pending.get("months") if same else None))
+        conv = pending.get("conv") if same else None
         if nlu.amount is not None:
             amount, conv, err = self._to_local(session, ctx, nlu.amount, mention)
             if err:
+                session.slots["pending_request"] = {"product": product, "amount": None, "months": months}
+                session.slots["awaiting"] = "amount"
                 return self._facts("fx_unavailable", "credit_eligibility", awaiting="amount", ccy=err)
         else:
-            amount = pending.get("amount") if pending.get("product") == product and not nlu.product else None
-        if amount is None:
-            session.slots["awaiting"] = "amount"
-            session.slots["pending_request"] = {"product": product, "amount": None, "months": months}
-            return self._facts("ask_amount", "credit_eligibility", awaiting="amount",
-                               product=templates.PRODUCT_NAME[session.language][product], months=str(months))
+            amount = pending.get("amount") if same and not nlu.product else None
         session.slots["pending_request"] = {"product": product, "amount": amount, "months": months, "conv": conv}
         return self._evaluate(session, ctx, "credit_eligibility")
 
     def _income(self, session: Session, ctx: ToolContext, nlu: NLUResult, mention: money.CurrencyMention) -> dict:
+        """El cliente dice cuanto gana: reemplaza el ingreso usado y la oferta queda condicional (F03). Ya no hay un tope de
+        aumento que mande a revision: el asesor verifica los datos declarados de toda oferta condicional."""
         profile = get_profile(ctx)
         if nlu.declared_income is None:
             session.slots["awaiting"] = "income"
-            return self._facts("ask_income", "update_income", awaiting="income", ccy=profile["income_ccy"])
+            return self._facts("ask_income", "update_income", awaiting="income", ccy=profile["local_currency"])
         inc, conv, err = self._to_local(session, ctx, nlu.declared_income, mention)
         if err:
             return self._facts("fx_unavailable", "update_income", awaiting="income", ccy=err)
-        session.slots["declared_income"] = inc
+        self._declared(session)["income"] = inc
         session.slots["declared_income_conv"] = conv
-        on_file = profile["monthly_income"]
-        if on_file and inc > on_file * (1 + self.policy["declared_income"]["max_uplift_without_review"]):
-            return self._offer_handoff(session, "INCOME_UPLIFT_REVIEW", "update_income", kind="income_review")
         if session.slots.get("pending_request", {}).get("amount"):
             return self._evaluate(session, ctx, "update_income")  # recalculo inmediato con el dato nuevo
-        return self._facts("income_saved", "update_income", income=self._m(session, inc, profile["income_ccy"]),
+        return self._facts("income_saved", "update_income", income=self._m(session, inc, profile["local_currency"]),
                            fx=self._fx_note(session))
 
     def _offers(self, session: Session, ctx: ToolContext) -> dict:
-        info = offer_rates(ctx, session.slots.get("declared_income"))
-        probe, ccy = info["probe"], info["ccy"]
-        if not info["rates"]:
-            return self._from_decision(session, "credit_offers", probe.decision, ccy)
-        names = templates.PRODUCT_NAME[session.language]
-        lines = ", ".join(f"{names[p]}: {fmt_pct(r)}" for p, r in info["rates"].items())
-        d = probe.decision
-        if d.max_amount:
-            cap = templates.render("offers_capacity", session.language,
-                                   {"months": str(DEFAULT_MONTHS["personal_loan"]), "max_amount": self._m(session, d.max_amount, ccy)})
-        else:
-            cap = templates.render("offers_no_capacity", session.language, {})
+        """'¿Que ofertas tengo?': la opcion destacada de cada producto (lo mas alto), con los datos del banco y lo declarado."""
+        offers = get_offers(ctx, self._declared(session))
+        profile, lang = offers.profile, session.language
+        if not profile.get("is_eligible"):
+            session.slots["pending_request"] = {"product": "personal_loan", "amount": None, "months": None, "conv": None}
+            return self._evaluate(session, ctx, "credit_offers")
+        if not offers.ordered:
+            return self._facts("offers_none", "credit_offers", outcome="offers")
+        ccy, lines = profile["local_currency"], []
+        for o in offers.ordered:
+            product = eng.PRODUCT_NAME[o["product_code"]]
+            lines.append(templates.render("offer_line_card" if product == "credit_card" else "offer_line", lang, {
+                "product": templates.product_label(product, o["tier"], lang), "months": str(o["term_months"]),
+                "max_amount": self._m(session, to_local(profile, o["offer_max_amount_usd"], floor=True), ccy),
+                "rate": fmt_pct(o["offer_rate_pct"])}))
         session.slots.setdefault("verified_facts", []).append(
-            {"type": "offer_rates", "rates": {k: round(v, 2) for k, v in info["rates"].items()},
-             "policy_version": self.policy["version"]})
-        return self._facts("offers", "credit_offers", outcome="offers", lines=lines, capacity=cap)
+            {"type": "featured_offers", "policy_version": self.policy.version,
+             "options": [{k: o[k] for k in ("option_code", "term_months", "offer_rate_pct", "offer_max_amount_usd")}
+                         for o in offers.ordered]})
+        return self._facts("offers", "credit_offers", outcome="offers", lines=templates.join_list(lines, lang))
+
+    def _proactive_accepted(self, session: Session, ctx: ToolContext, intent: str) -> dict:
+        """'Si' a la oferta proactiva: se pide el monto, con lo mas alto como referencia (y como respuesta a un 'si')."""
+        product = session.slots.get("offer_product") or "personal_loan"
+        q = recalculate_offer(ctx, product, None, None, self._declared(session), record=False)
+        if q.outcome not in CONCLUSIVE_OK:
+            session.slots["pending_request"] = {"product": product, "amount": None, "months": None, "conv": None}
+            return self._evaluate(session, ctx, intent)
+        ccy = q.profile["local_currency"]
+        top = to_local(q.profile, q.max_amount_usd, floor=True)
+        session.slots["pending_request"] = {"product": product, "amount": None, "months": q.term_months if product != "credit_card" else None,
+                                            "conv": None, "featured_amount": top}
+        session.slots["awaiting"] = "amount"
+        kind = "offer_accepted_card" if product == "credit_card" else "offer_accepted"
+        return self._facts(kind, intent, awaiting="amount", months=str(q.term_months), max_amount=self._m(session, top, ccy))
 
     def _evaluate(self, session: Session, ctx: ToolContext, intent: str) -> dict:
         req = session.slots["pending_request"]
-        res = evaluate_credit(ctx, req["product"], req["amount"], req["months"], session.slots.get("declared_income"))
-        d = res.decision
-        evaluation = {"request": res.request, "outcome": d.outcome, "reasons": d.reasons, "band": d.band,
-                      "rate_pct": d.rate_pct, "payment": d.payment, "dti_after": d.dti_after,
-                      "max_amount": d.max_amount, "policy_version": d.policy_version,
-                      "income_declared_unverified": res.income_declared}
-        session.slots["last_evaluation"] = evaluation
-        session.actions.append({"type": "credit_evaluation", "outcome": d.outcome, "verified": True,
-                                "policy_version": d.policy_version})
-        session.slots.setdefault("verified_facts", []).append({"type": "credit_evaluation", **evaluation})
-        if d.outcome in (ce.ELIGIBLE, ce.ELIGIBLE_PROVISIONAL):
-            p = self.policy
-            facts = self._facts(d.outcome, intent, outcome=d.outcome,
-                               product=templates.PRODUCT_NAME[session.language][req["product"]],
-                               amount=self._m(session, req["amount"], res.ccy), months=str(req["months"]),
-                               payment=self._m(session, d.payment, res.ccy, 2), rate=fmt_pct(d.rate_pct),
-                               dti=fmt_pct(d.dti_after * 100), max_dti=fmt_pct(p["max_dti"] * 100),
-                               fx=self._fx_note(session))
+        q = recalculate_offer(ctx, req["product"], req.get("amount"), req.get("months"), self._declared(session))
+        return self._quote_facts(session, intent, q, req)
+
+    def _record_evaluation(self, session: Session, q: eng.Quote, req: dict) -> dict:
+        p = q.profile
+        ev = {"request": {"product": req["product"], "amount": req.get("amount"), "months": q.term_months},
+              "outcome": q.outcome, "reasons": list(q.reasons), "band": p.get("risk_band"), "rate_pct": q.rate_pct,
+              "payment": to_local(p, q.installment_usd), "dti_after": q.dti_after,
+              "max_amount": to_local(p, q.max_amount_usd, floor=True), "policy_version": q.policy_version,
+              "income_declared_unverified": q.conditional, "flags": list(q.flags),
+              "option_code": q.option["option_code"] if q.option else None, "tier": q.option["tier"] if q.option else None,
+              "amount_usd": q.amount_usd, "installment_usd": q.installment_usd, "ccy": p.get("local_currency")}
+        session.slots["last_evaluation"] = ev
+        session.actions.append({"type": "credit_evaluation", "outcome": q.outcome, "verified": True,
+                                "policy_version": q.policy_version})
+        session.slots.setdefault("verified_facts", []).append({"type": "credit_evaluation", **ev})
+        return ev
+
+    def _ask_household(self, session: Session, facts: dict) -> dict:
+        """Politica 0.4: a todos los clientes se les pregunta igual, una vez, si alguien mas del hogar aporta ingresos."""
+        session.slots["household_asked"] = True
+        session.slots["awaiting"] = "household"
+        facts["kind2"] = "ask_household"
+        facts.update(awaiting="household", suggest="yes_no")
+        return facts
+
+    def _quote_facts(self, session: Session, intent: str, q: eng.Quote, req: dict) -> dict:
+        lang, p = session.language, q.profile
+        ccy = p["local_currency"]
+        product = req["product"]
+        tier = q.option["tier"] if q.option else None
+        label = templates.product_label(product, tier, lang)
+        L = lambda usd, floor=False: self._m(session, to_local(p, usd, floor=floor) or 0, ccy)   # noqa: E731
+        max_dti = fmt_pct(self.policy.max_dti * 100)
+        terms = templates.join_list([str(t) for t in q.allowed_terms], lang)
+        can_ask = not session.slots.get("household_asked")
+
+        if q.outcome in CONCLUSIVE_OK and req.get("amount") is None:       # sin monto: lo mas alto primero
+            top = to_local(p, q.max_amount_usd, floor=True)
+            req.update(featured_amount=top, months=q.term_months if product != "credit_card" else None)
+            session.slots["awaiting"] = "amount"
+            kind = "offer_featured_card" if product == "credit_card" else "offer_featured"
+            return self._facts(kind, intent, outcome="offer", awaiting="amount", product=label, months=str(q.term_months),
+                               max_amount=self._m(session, top, ccy), rate=fmt_pct(q.rate_pct),
+                               payment=L(q.installment_usd) if q.installment_usd else "", fx=self._fx_note(session))
+        if req.get("amount") is not None or q.outcome != eng.UNAVAILABLE:
+            self._record_evaluation(session, q, req)
+
+        if q.outcome in CONCLUSIVE_OK:
+            card = "_card" if product == "credit_card" else ""
+            kind = ("eligible" + card) if q.outcome == eng.ELIGIBLE else ("eligible_card_provisional" if card else "eligible_provisional")
+            facts = self._facts(kind, intent, outcome=q.outcome, product=label,
+                                amount=self._m(session, req["amount"], ccy), months=str(q.term_months),
+                                payment=L(q.installment_usd), rate=fmt_pct(q.rate_pct), dti=fmt_pct(q.dti_after * 100),
+                                max_dti=max_dti, fx=self._fx_note(session))
+            if can_ask:
+                return self._ask_household(session, facts)
             facts["kind2"] = "ask_proceed"                      # "¿Le gustaria que avancemos con la solicitud?"
             facts.update(awaiting="proceed", suggest="yes_no")
             session.slots["awaiting"] = "proceed"
             return facts
-        return self._from_decision(session, intent, d, res.ccy, req)
 
-    def _from_decision(self, session: Session, intent: str, d: ce.Decision, ccy: str, req: dict | None = None) -> dict:
-        reason = d.reasons[0] if d.reasons else ""
-        if d.outcome == ce.NEEDS_DATA:
-            if "monthly_income" in d.missing and "credit_score" not in d.missing:
-                session.slots["awaiting"] = "income"
-                return self._facts("ask_income", intent, outcome=d.outcome, awaiting="income", ccy=ccy)
-            return self._offer_handoff(session, "MISSING_DATA", intent, kind="needs_data_score", outcome=d.outcome)
-        if d.outcome == ce.DECLINED and reason == "DTI_EXCEEDED" and req and (d.max_amount or 0) <= 0:
-            return self._facts("declined_no_capacity", intent, outcome=d.outcome,
-                               dti=fmt_pct(d.dti_after * 100), max_dti=fmt_pct(self.policy["max_dti"] * 100),
+        reason = q.reasons[0] if q.reasons else ""
+        if q.outcome == eng.NEEDS_DATA:
+            session.slots["awaiting"] = "income"
+            return self._facts("ask_income", intent, outcome=q.outcome, awaiting="income", ccy=ccy)
+        if q.outcome == eng.DECLINED and reason == "DTI_EXCEEDED":
+            facts = self._facts("declined_dti", intent, outcome=q.outcome, dti=fmt_pct((q.dti_after or 0) * 100),
+                                max_dti=max_dti, months=str(q.term_months), max_amount=L(q.max_amount_usd, True),
+                                fx=self._fx_note(session))
+            return self._ask_household(session, facts) if can_ask else facts
+        if q.outcome == eng.DECLINED and q.reasons == ["R08_NO_CAPACITY"]:
+            facts = self._facts("declined_no_capacity", intent, outcome=q.outcome,
+                                dti=fmt_pct((p.get("current_debt_to_income") or 0) * 100), max_dti=max_dti,
+                                fx=self._fx_note(session))
+            return self._ask_household(session, facts) if can_ask else facts
+        if q.outcome == eng.DECLINED and q.reasons and all(r.startswith(("R05", "R08")) for r in q.reasons):
+            session.slots["awaiting"] = "income"                 # ingreso bajo el minimo: declarar otro puede cambiarlo
+            return self._facts("income_below_min", intent, outcome=q.outcome, awaiting="income", ccy=ccy)
+        if q.outcome == eng.DECLINED and "R06_SCORE_MISSING" in q.reasons and len(q.reasons) == 1:
+            return self._offer_handoff(session, "MISSING_DATA", intent, kind="needs_data_score", outcome=q.outcome)
+        if q.outcome == eng.DECLINED:
+            return self._offer_handoff(session, "POLICY_DECLINED", intent, kind="declined_generic", outcome=q.outcome)
+
+        # Elegible, pero no para ese plazo o monto
+        max_age = str(self.policy.params.get("max_age_at_maturity_years", ""))
+        if reason == "PRODUCT_ABOVE_AGE_AT_MATURITY":
+            return self._facts("product_age", intent, outcome=q.outcome, suggest="start", product=label, max_age=max_age,
                                fx=self._fx_note(session))
-        if d.outcome == ce.DECLINED and reason == "DTI_EXCEEDED" and req:
-            return self._facts("declined_dti", intent, outcome=d.outcome,
-                               dti=fmt_pct(d.dti_after * 100), max_dti=fmt_pct(self.policy["max_dti"] * 100),
-                               months=str(req["months"]), max_amount=self._m(session, d.max_amount or 0, ccy),
+        if reason == "ABOVE_MAX_AMOUNT":
+            session.slots["awaiting"] = "amount"
+            req.update(amount=None, featured_amount=to_local(p, q.max_amount_usd, floor=True))
+            return self._facts("above_max", intent, outcome=q.outcome, awaiting="amount", product=label,
+                               months=str(q.term_months), max_amount=L(q.max_amount_usd, True), fx=self._fx_note(session))
+        if reason == "BELOW_MIN_AMOUNT":
+            session.slots["awaiting"] = "amount"
+            req["amount"] = None
+            return self._facts("below_min", intent, outcome=q.outcome, awaiting="amount", product=label,
+                               min_amount=self._m(session, math.ceil(to_local(p, q.min_amount_usd)), ccy),
                                fx=self._fx_note(session))
-        if d.outcome == ce.DECLINED:
-            return self._offer_handoff(session, "POLICY_DECLINED", intent, kind="declined_generic", outcome=d.outcome)
-        return self._offer_handoff(session, reason or "MISSING_DATA", intent, kind="needs_review", outcome=d.outcome)
+        if reason in ("TERM_NOT_IN_GRID", "TERM_ABOVE_BAND_MAXIMUM", "TERM_ABOVE_AGE_AT_MATURITY") or (
+                reason == "NO_CAPACITY_FOR_OPTION" and q.allowed_terms):
+            kind = {"TERM_NOT_IN_GRID": "term_not_offered", "TERM_ABOVE_BAND_MAXIMUM": "term_band",
+                    "TERM_ABOVE_AGE_AT_MATURITY": "term_age"}.get(reason, "term_no_capacity")
+            session.slots["awaiting"] = "term"
+            return self._facts(kind, intent, outcome=q.outcome, awaiting="term", product=label, terms=terms, max_age=max_age,
+                               fx=self._fx_note(session))
+        facts = self._facts("option_no_capacity", intent, outcome=q.outcome, product=label, fx=self._fx_note(session))
+        return self._ask_household(session, facts) if can_ask else facts
+
+    def _household_answer(self, session: Session, ctx: ToolContext, awaiting: str, intent: str, message: str,
+                          amounts: list[float], mention: money.CurrencyMention) -> dict | None:
+        """Respuestas a la pregunta del hogar. None = que siga el flujo general (pidio un asesor, se despide, etc.)."""
+        if intent in ("request_human", "closing", "thanks", "greeting", "case_status", "account_inquiry"):
+            return None
+        if intent == "update_income" and not _THIRD_PARTY.search(norm(message)):
+            return None                                           # "ahora gano X": su propio ingreso, no el del hogar
+        ccy = get_profile(ctx)["local_currency"]
+        if awaiting == "household" and amounts and intent != "confirm_no":
+            awaiting = "household_income"                         # "si, mi pareja gana 20.000": ya trae el ingreso
+        if awaiting == "household":
+            if intent == "confirm_yes":
+                session.slots["awaiting"] = "household_income"
+                return self._facts("ask_household_income", intent, awaiting="household_income", ccy=ccy)
+            if intent == "confirm_no":
+                return self._after_household(session, "household_none", intent)
+            return None
+        if awaiting == "household_income":
+            if not amounts:
+                if intent == "confirm_no":
+                    return self._after_household(session, "household_none", intent)
+                return None
+            value, conv, err = self._to_local(session, ctx, amounts[0], mention)
+            if err:
+                session.slots["awaiting"] = "household_income"
+                return self._facts("fx_unavailable", intent, awaiting="household_income", ccy=err)
+            session.slots["household_pending"] = {"income": value}
+            session.slots["awaiting"] = "household_debt"
+            return self._facts("ask_household_debt", intent, awaiting="household_debt")
+        # household_debt
+        pending = session.slots.pop("household_pending", {})
+        debt = amounts[0] if amounts else (0.0 if _NO_DEBT.search(norm(message)) else None)
+        if debt is None or not pending:
+            # Sin las cuotas de esa persona no se suma su ingreso: el asesor lo completa (politica 0.4, seccion 6)
+            session.slots["household_unknown_debt"] = pending.get("income")
+            session.actions.append({"type": "household_income_not_added", "reason": "installments_unknown", "verified": True})
+            return self._after_household(session, "household_unknown", intent)
+        if amounts:
+            debt, _, err = self._to_local(session, ctx, debt, mention)
+            if err:
+                session.slots["household_pending"] = pending
+                session.slots["awaiting"] = "household_debt"
+                return self._facts("fx_unavailable", intent, awaiting="household_debt", ccy=err)
+        declared = self._declared(session)
+        declared["household_income"] = pending["income"]
+        declared["household_installments"] = debt
+        session.actions.append({"type": "household_income_added", "verified": False})
+        if session.slots.get("pending_request", {}).get("amount"):
+            return self._evaluate(session, ctx, "update_income")
+        session.slots["pending_request"] = {**session.slots.get("pending_request", {"product": "personal_loan"}), "amount": None}
+        return self._evaluate(session, ctx, "update_income")
+
+    def _after_household(self, session: Session, kind: str, intent: str) -> dict:
+        """Tras la pregunta del hogar: si hay una propuesta viable, se pregunta si avanzar; si no, queda abierto."""
+        if self._has_proposal(session):
+            session.slots["awaiting"] = "proceed"
+            facts = self._facts(kind, intent, awaiting="proceed", suggest="yes_no")
+            facts["kind2"] = "ask_proceed"
+            return facts
+        return self._facts("household_none_open" if kind == "household_none" else kind, intent)
 
     # ------------------------------------------------------------------ solicitud y documentos
     def _doc_list(self, session: Session, ids: list[str]) -> str:
@@ -412,10 +579,24 @@ class Orchestrator:
     def _start_application(self, session: Session, ctx: ToolContext) -> dict:
         req = session.slots.get("pending_request") or {}
         ev = session.slots.get("last_evaluation") or {}
-        if not req.get("amount") or ev.get("outcome") not in (ce.ELIGIBLE, ce.ELIGIBLE_PROVISIONAL):
+        if not req.get("amount") or ev.get("outcome") not in CONCLUSIVE_OK:
             return self._facts("unknown", "confirm_yes", suggest="start")
-        plan = documents.plan(self.policy, self.repo, ctx.customer_id, req["product"],
-                              bool(ev.get("income_declared_unverified")))
+        declared = self._declared(session)
+        plan = documents.plan(self.rules, self.repo, ctx.customer_id, req["product"],
+                              bool(ev.get("income_declared_unverified")), household="household_income" in declared)
+        # Aceptacion: se recalcula y se registra la fila de credit_offers (la API, nunca el LLM)
+        origin = "proactive" if session.slots.get("offer_made") and session.slots.get("offer_product") == req["product"] \
+            else "customer_interest"
+        try:
+            row = accept_offer(ctx, product=req["product"], amount_local=req["amount"], months=req.get("months"),
+                               declared_local=declared, offer_origin=origin, session_id=session.id,
+                               language=session.language, required_documents=plan.required)
+        except ValueError as exc:
+            log(logger, "offer_rejected", error=str(exc))
+            return self._facts("unknown", "confirm_yes", suggest="start")
+        session.slots["accepted_offer"] = row
+        session.actions.append({"type": "offer_accepted", "offer_id": row["offer_id"], "option_code": row["option_code"],
+                                "flags": list(row["flags"]), "verified": True})
         session.slots["application"] = {"status": "documents", "product": req["product"], "required": plan.required,
                                         "on_file": plan.on_file, "need": plan.need, "declared": [], "missing": [],
                                         "queue": [], "current": None}
@@ -480,7 +661,7 @@ class Orchestrator:
     @staticmethod
     def _has_proposal(session: Session) -> bool:
         ev = session.slots.get("last_evaluation") or {}
-        return ev.get("outcome") in (ce.ELIGIBLE, ce.ELIGIBLE_PROVISIONAL) and bool(session.slots.get("pending_request"))
+        return ev.get("outcome") in CONCLUSIVE_OK and bool((session.slots.get("pending_request") or {}).get("amount"))
 
     def _close_turn(self, session: Session, ctx: ToolContext, intent: str) -> dict:
         if self._has_proposal(session) and not session.slots.get("summary_delivered"):
@@ -492,7 +673,7 @@ class Orchestrator:
 
     def conclude(self, session: Session) -> ChatReply:
         """Cierre explicito de la conversacion (POST /end): resumen y aviso de correo si hay una propuesta."""
-        ctx = ToolContext(session.customer_id, self.repo, self.policy)
+        ctx = ToolContext(session.customer_id, self.repo, self.policy, self.offers)
         if self._has_proposal(session) and not session.slots.get("summary_delivered"):
             facts = self._with_conclusion(session, ctx, self._facts("closing_summary", "closing"))
             facts["extras"].append("goodbye")
@@ -507,7 +688,7 @@ class Orchestrator:
 
     def _summary_fmt(self, session: Session, ctx: ToolContext) -> dict[str, str]:
         lang, req, ev = session.language, session.slots["pending_request"], session.slots["last_evaluation"]
-        ccy = get_profile(ctx)["income_ccy"]
+        ccy = get_profile(ctx)["local_currency"]
         tx, app = templates.SUMMARY_TEXT[lang], session.slots.get("application") or {}
         if app.get("status") == "ready":
             docs_status = tx["docs_complete"]
@@ -517,12 +698,12 @@ class Orchestrator:
             docs_status = tx["docs_not_started"]
         ticket = session.handoff["ticket_id"] if session.handoff else ""
         email = self.repo.contact_email_masked(ctx.customer_id) or ""
-        months = str(req["months"])
         return {
-            "product": templates.PRODUCT_NAME[lang][req["product"]], "amount": self._m(session, req["amount"], ccy),
-            "months": months, "rate": fmt_pct(ev["rate_pct"]), "payment": self._m(session, ev["payment"], ccy, 2),
-            "dti": fmt_pct(ev["dti_after"] * 100), "max_dti": fmt_pct(self.policy["max_dti"] * 100),
-            "status": tx["provisional"] if ev["outcome"] == ce.ELIGIBLE_PROVISIONAL else tx["eligible"],
+            "product": templates.product_label(req["product"], ev.get("tier"), lang),
+            "amount": self._m(session, req["amount"], ccy), "months": str(ev["request"]["months"]),
+            "rate": fmt_pct(ev["rate_pct"]), "payment": self._m(session, ev["payment"], ccy, 2),
+            "dti": fmt_pct(ev["dti_after"] * 100), "max_dti": fmt_pct(self.policy.max_dti * 100),
+            "status": tx["provisional"] if ev["outcome"] == eng.ELIGIBLE_PROVISIONAL else tx["eligible"],
             "docs_status": docs_status, "ticket": ticket, "ticket_line": tx["ticket_line"].format(ticket=ticket) if ticket else "",
             "email": email,
         }
@@ -553,7 +734,7 @@ class Orchestrator:
         if fx:
             notes.insert(0, fx)
         pdf = render_summary_pdf(lang=lang, first_name=session.first_name or "", rows=rows, notes=notes,
-                                 ticket=fmt["ticket"] or None, policy_version=self.policy["version"])
+                                 ticket=fmt["ticket"] or None, policy_version=self.policy.version)
         record = self.outbox.queue(customer_id=ctx.customer_id, to_masked=fmt["email"] or None,
                                    subject=templates.EMAIL_SUBJECT[lang], pdf=pdf, language=lang,
                                    ticket_id=fmt["ticket"] or None)
@@ -567,8 +748,9 @@ class Orchestrator:
 
     # ------------------------------------------------------------------ monedas
     def _to_local(self, session: Session, ctx: ToolContext, value: float, mention: money.CurrencyMention):
-        """(valor en la moneda local, conversion o None, error o None). La politica trabaja en la moneda del ingreso."""
-        local = get_profile(ctx)["income_ccy"]
+        """(valor en la moneda local, conversion o None, error o None). El cliente habla en su moneda local o en otra
+        soportada; las herramientas pasan de moneda local a USD con fx_to_usd del perfil."""
+        local = get_profile(ctx)["local_currency"]
         spoken = money.resolve(mention, local)
         if spoken is None:
             return value, None, None                      # no dijo moneda: se asume la local y se conserva lo que haya
@@ -622,8 +804,6 @@ class Orchestrator:
         questions = {
             "USER_REQUEST": ["Motivo de la consulta no especificado por el cliente"],
             "MISSING_DATA": ["Completar score o ingreso faltantes del cliente"],
-            "INCOME_UPLIFT_REVIEW": ["Verificar el ingreso declarado, muy superior al registrado"],
-            "UNSUPPORTED_PRODUCT": ["Atender solicitud de tarjeta de credito"],
             "UNCLEAR": ["El asistente no logro entender la consulta"],
             "POLICY_DECLINED": ["El cliente puede pedir revision manual del rechazo"],
             "APPLICATION_READY": ["Verificar los documentos que el cliente declaro tener y el ingreso; completar la revision final"],
@@ -640,8 +820,16 @@ class Orchestrator:
             questions = ["Retomar el tema que el cliente describio en el chat (ver case_notes y topic)"]
         session.actions.append({"type": "handoff_created", "ticket_id": ticket, "verified": True, "at": now})
         session.handoff = {"ticket_id": ticket, "created_at": now, "reason": reason}
+        if session.slots.get("household_unknown_debt") is not None:
+            questions = questions + ["Completar las cuotas mensuales de la persona del hogar que aporta ingresos: el cliente "
+                                     "no las supo y su ingreso no se sumo"]
         summary = build_summary(session, ticket, now, reason, session.slots.get("last_evaluation"), questions)
         self._improve_narrative(summary)
+        row = session.slots.get("accepted_offer")
+        if row and not row.get("handoff_ticket_id") and self.offers is not None:
+            # La oferta aceptada queda enlazada a su ticket; la fila nueva reemplaza a la anterior (MERGE por offer_id)
+            row.update(status="handed_off", handoff_ticket_id=ticket, advisor_summary=summary["narrative"], updated_at=now)
+            self.offers.save(row)
         self.queue.add(summary)
         return self._facts("handoff_created", "request_human", outcome="handed_off", ticket=ticket, handoff_ticket=ticket)
 

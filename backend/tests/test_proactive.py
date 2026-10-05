@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.conftest import customers_by_offer_profile, login
+from tests.conftest import customers_by_offer_profile, login, offer_amount
 
 
 @pytest.fixture()
@@ -84,8 +84,14 @@ def test_accepting_the_offer_leads_into_the_normal_eligibility_flow(client, stat
     say(client, sid, h, "gracias")
     r = say(client, sid, h, "sí")
     assert r["awaiting"] == "amount"
-    r2 = say(client, sid, h, str(int(c["income"] * 0.2)))
-    assert r2["intent"] == "credit_eligibility" and r2["outcome"] in ("eligible", "declined")
+    product = state.store.get(sid).slots["offer_product"]                 # la destacada que se ofrecio
+    amount, _ = offer_amount(state, c["cid"], product, share=0.5)
+    r2 = say(client, sid, h, str(int(amount)))
+    assert r2["intent"] == "credit_eligibility" and r2["outcome"] == "eligible"
+    say(client, sid, h, "no")                                              # nadie mas del hogar aporta ingresos
+    say(client, sid, h, "sí")                                              # avanzar: la oferta aceptada queda registrada
+    row = state.store.get(sid).slots["accepted_offer"]
+    assert row["offer_origin"] == "proactive" and row["policy_version"] == "0.4"
 
 
 def test_declining_the_offer_means_it_is_not_repeated(client, state, groups):
@@ -129,8 +135,8 @@ def test_no_offer_without_marketing_consent(client, state, groups):
 def test_reactive_request_ignores_marketing_consent(client, state, groups):
     """Quien pide un credito se evalua aunque NO acepte marketing: el consentimiento solo gobierna lo proactivo."""
     sid, h, c = start(client, state, groups, "noconsent_pre")
-    r = say(client, sid, h, f"quiero un préstamo de {int(c['income'] * 0.2)} a 24 meses")
-    assert r["intent"] == "credit_eligibility" and r["outcome"] in ("eligible", "declined")
+    r = say(client, sid, h, "quiero un préstamo")
+    assert r["intent"] == "credit_eligibility" and r["outcome"] in ("offer", "unavailable")
     assert r["proactive_offer"] is False
     r2 = say(client, sid, h, "¿qué tasas tienen para mí?")
     assert r2["outcome"] == "offers"                # la consulta de tasas tambien funciona sin consentimiento
@@ -168,8 +174,8 @@ def test_sensitive_topic_handed_off_gets_no_offer(client, state, groups):
 
 def test_no_offer_after_a_declined_credit_evaluation(client, state, groups):
     sid, h, c = start(client, state, groups, "consent_pre")
-    r = say(client, sid, h, f"necesito un préstamo de {int(c['income'] * 8)} a 36 meses")
-    assert r["outcome"] == "declined"
+    r = say(client, sid, h, f"necesito un préstamo de {int(c['income'] * 12)} a 36 meses")
+    assert r["outcome"] in ("declined", "unavailable")
     assert say(client, sid, h, "gracias")["proactive_offer"] is False
 
 

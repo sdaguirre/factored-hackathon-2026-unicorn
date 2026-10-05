@@ -3,13 +3,21 @@
 # el navegador solo habla con el nginx de la interfaz, que reenvia /v1 al backend.
 services:
   chat-backend:
-    build: ./backend
+    # Contexto en la raiz: la imagen lleva la politica de credito de referencia (data/policy, data/reference), la misma de gold.
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     image: chat-backend:0.1.0
     env_file:
       - path: ./backend/.env
         required: false
     environment:
       CHAT_ENV: ${CHAT_ENV:-dev}
+      CHAT_OFFERS_PATH: /data/offers/credit_offers.jsonl
+    # Ofertas aceptadas (filas de gold credit_offers): en una carpeta del host ignorada por git (.local/), para que
+    # sobrevivan a un reinicio y backend/scripts/sync_credit_offers.py las lea con --file .local/offers/credit_offers.jsonl.
+    volumes:
+      - ./.local/offers:/data/offers
     read_only: true
     tmpfs:
       - /tmp

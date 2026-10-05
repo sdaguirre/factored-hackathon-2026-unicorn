@@ -79,12 +79,15 @@ def main() -> None:
     ap.add_argument("--doc")
     a = ap.parse_args()
 
-    cu = pd.read_parquet(SNAP / "customers.parquet")
-    ok = cu[cu.monthly_income.notna() & cu.credit_score.notna() & (cu.credit_score >= 680) & (cu.max_days_past_due == 0)]
-    doc = a.doc or str(ok.document_number.iloc[0])
-    income = float(cu[cu.document_number.astype(str) == doc].monthly_income.iloc[0])
-
-    st, s = call(a.base, "POST", "/v1/sessions", {"document_number": doc, "language": a.lang})
+    cu = pd.read_parquet(SNAP / "customers.parquet").merge(pd.read_parquet(SNAP / "credit_profile.parquet"), on="customer_id",
+                                                           suffixes=("", "_gold"))
+    cu["income"] = cu.income_used_usd / cu.fx_to_usd          # ingreso de gold (USD) en la moneda local del cliente
+    ok = cu[cu.is_eligible & (cu.max_term_personal_loan_months >= 36)]
+    for doc in ([a.doc] if a.doc else [str(d) for d in ok.document_number]):
+        st, s = call(a.base, "POST", "/v1/sessions", {"document_number": doc, "language": a.lang})
+        if "auth" in s:
+            break                       # el primero con datos para el reto de seguridad (si no: AUTH_UNAVAILABLE)
+    income = float(cu[cu.document_number.astype(str) == doc].income.iloc[0])
     print(f"[crear sesion] {st} -> {len(s['auth']['questions'])} preguntas")
     sid, tok = s["session_id"], s["token"]
     owner = Owner(doc)
@@ -97,10 +100,10 @@ def main() -> None:
         print("  BOT:", v["greeting"])
 
     script = {
-        "es": ["¿qué tasas tienen para mí?", f"necesito un préstamo de {int(income * 0.3)} a 24 meses",
-               f"quiero un préstamo de {int(income * 6)}", f"ahora gano {int(income * 1.4)} al mes", "quiero hablar con un asesor"],
-        "pt": ["quais são as taxas para mim?", f"quero um empréstimo de {int(income * 0.3)} em 24 meses",
-               f"preciso de um empréstimo de {int(income * 6)}", "quero falar com um atendente"],
+        "es": ["¿qué ofertas tengo?", "quiero un préstamo", f"necesito un préstamo de {int(income * 3)} a 36 meses", "no",
+               f"quiero un préstamo de {int(income * 12)}", f"ahora gano {int(income * 1.4)} al mes", "quiero hablar con un asesor"],
+        "pt": ["quais ofertas eu tenho?", f"quero um empréstimo de {int(income * 3)} em 36 meses", "não",
+               f"preciso de um empréstimo de {int(income * 12)}", "quero falar com um atendente"],
     }[a.lang]
     for msg in script:
         st, r = call(a.base, "POST", f"/v1/sessions/{sid}/messages", {"message": msg}, tok)

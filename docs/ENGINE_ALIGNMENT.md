@@ -1,5 +1,12 @@
 # Aligning the backend credit engine to policy 0.4
 
+> **Status (2026-10-05): engine aligned.** The backend applies policy 0.4 through `backend/app/policy/engine.py`, which
+> loads `data/policy/credit_policy.py`; `check_engine_parity.py --engine app.policy.engine:offer_options --pythonpath backend`
+> reports 0 mismatches on the production export. Accepted offers use option A (local JSONL +
+> `backend/scripts/sync_credit_offers.py`), kept on a mounted host folder (`.local/offers/`) under Docker Compose; the
+> sync was run against `workspace.gold_latam_bank_test.credit_offers` with one demo offer, not yet against production. The sections below describe the
+> gap as it was before alignment.
+
 The backend engine (`backend/app/policy/credit_engine.py` + `backend/policy/credit_policy.yaml`)
 was built on a preliminary version of the credit rules so the team could work in parallel.
 Policy 0.4 (`docs/CREDIT_RULES.md`, parameters in `data/reference/`) is the reference version,
@@ -114,7 +121,7 @@ Two ways to get rows there from the demo:
 
 ## Done when
 
-- [ ] `check_engine_parity.py --engine <backend function>` reports 0 mismatches.
-- [ ] Backend tests pass with the policy 0.4 cases; CI green.
+- [x] `check_engine_parity.py --engine app.policy.engine:offer_options --pythonpath backend` reports 0 mismatches.
+- [x] Backend tests pass with the policy 0.4 cases.
 - [ ] Demo shows a proactive offer equal to gold, a recalculation with declared income, an
       accepted offer recorded in `credit_offers`, and the advisor handoff with flags.

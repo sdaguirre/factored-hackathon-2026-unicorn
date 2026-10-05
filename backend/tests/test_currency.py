@@ -12,7 +12,7 @@ from tests.conftest import customers_by_offer_profile, login
 def mx(state):
     """Un cliente con ingreso en MXN, preaprobado."""
     for c in customers_by_offer_profile(state)["consent_pre"]:
-        if state.repo.credit_profile(c["cid"])["income_ccy"] == "MXN":
+        if state.repo.credit_profile(c["cid"])["local_currency"] == "MXN":
             return c
     pytest.skip("sin cliente MXN en el conjunto de datos")
 
@@ -61,22 +61,22 @@ def test_conversion_is_none_without_a_rate(state):
 
 def test_dollars_are_converted_to_the_customer_currency_before_evaluating(client, state, mx):
     sid, h = login(client, state, mx["doc"])
-    r = say(client, sid, h, "necesito un préstamo de 1000 dólares a 24 meses")
+    r = say(client, sid, h, "necesito un préstamo de 8000 dólares a 24 meses")     # sobre el minimo de 5.000 USD
     s = state.store.get(sid)
     rate = usd_mxn(state)
-    assert s.slots["pending_request"]["amount"] == pytest.approx(1000 * rate)   # evaluado en MXN
+    assert s.slots["pending_request"]["amount"] == pytest.approx(8000 * rate)   # el cliente ve MXN; la politica, USD
     assert s.slots["pending_request"]["conv"]["src"] == "USD" and s.slots["spoken_ccy"] == "USD"
     assert fmt_number(rate, 2) in r["reply"] and "USD" in r["reply"] and "MXN" in r["reply"]  # tasa, monto original y convertido
     assert "17/06/2026" in r["reply"]                                              # fecha de la tasa: no es cotizacion en vivo
-    assert "≈ 1.000 USD" in r["reply"]                                             # ida y vuelta coherente: 1.000 USD sigue siendo 1.000 USD
+    assert "≈ 8.000 USD" in r["reply"]                                             # ida y vuelta coherente: 8.000 USD sigue siendo 8.000 USD
     assert r["outcome"] in ("eligible", "declined")
 
 
 def test_the_amount_in_local_pesos_is_not_converted(client, state, mx):
     sid, h = login(client, state, mx["doc"])
-    r = say(client, sid, h, "quiero un préstamo de 20.000 pesos a 24 meses")
+    r = say(client, sid, h, "quiero un préstamo de 200.000 pesos a 24 meses")
     s = state.store.get(sid)
-    assert s.slots["pending_request"]["amount"] == 20000.0 and not s.slots["pending_request"]["conv"]
+    assert s.slots["pending_request"]["amount"] == 200000.0 and not s.slots["pending_request"]["conv"]
     assert "tasa de referencia" not in r["reply"] and s.slots.get("spoken_ccy") is None
 
 
@@ -93,7 +93,7 @@ def test_declared_income_in_dollars_is_converted(client, state, mx):
     r = say(client, sid, h, "ahora gano 1000 dólares al mes")
     s = state.store.get(sid)
     rate = usd_mxn(state)
-    assert s.slots["declared_income"] == pytest.approx(1000 * rate)
+    assert s.slots["declared"]["income"] == pytest.approx(1000 * rate)
     assert s.slots["declared_income_conv"]["src"] == "USD" and fmt_number(rate, 2) in r["reply"]
 
 
@@ -113,7 +113,7 @@ def test_missing_rate_is_reported_not_invented(client, state, mx):
 
 def test_portuguese_conversion_and_unsupported_currency(client, state, mx):
     sid, h = login(client, state, mx["doc"], language="pt")
-    r = say(client, sid, h, "preciso de um empréstimo de 1000 dólares em 24 meses")
+    r = say(client, sid, h, "preciso de um empréstimo de 8000 dólares em 24 meses")
     assert "Converti" in r["reply"] and fmt_number(usd_mxn(state), 2) in r["reply"]
     r2 = say(client, sid, h, "na verdade quero 8000 reais")
     assert "BRL" in r2["reply"] and r2["language"] == "pt"

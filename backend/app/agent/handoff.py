@@ -20,12 +20,18 @@ REASON_LABEL = {
     "USER_REQUEST": "el cliente pidió hablar con una persona", "OTHER_TOPIC": "tema que el asistente no resuelve",
     "ACCOUNT_DETAIL": "consulta de detalle de un producto (saldos o movimientos)", "INCIDENT": "incidente reportado por el cliente",
     "CASE_FOLLOWUP": "seguimiento de un caso abierto", "UNCLEAR": "el asistente no logró entender la consulta",
-    "MISSING_DATA": "faltan datos para evaluar el crédito", "INCOME_UPLIFT_REVIEW": "ingreso declarado muy superior al registrado",
-    "UNSUPPORTED_PRODUCT": "producto que el asistente no gestiona", "POLICY_DECLINED": "crédito no elegible por política",
+    "MISSING_DATA": "faltan datos para evaluar el crédito", "POLICY_DECLINED": "crédito no elegible por política",
     "APPLICATION_READY": "solicitud de crédito lista para revisión final", "DOCS_INCOMPLETE": "solicitud con documentación pendiente",
 }
-CREDIT_REASONS = frozenset({"MISSING_DATA", "INCOME_UPLIFT_REVIEW", "UNSUPPORTED_PRODUCT", "POLICY_DECLINED",
-                            "APPLICATION_READY", "DOCS_INCOMPLETE"})
+CREDIT_REASONS = frozenset({"MISSING_DATA", "POLICY_DECLINED", "APPLICATION_READY", "DOCS_INCOMPLETE"})
+# Lo que el asesor necesita de la oferta aceptada (fila de gold credit_offers): que se ofrecio, con que datos y que revisar.
+OFFER_FIELDS = ("offer_id", "offer_origin", "option_code", "product_type", "tier", "term_months", "amount_usd", "amount_local",
+                "local_currency", "annual_rate_pct", "monthly_installment_usd", "monthly_installment_local",
+                "debt_to_income_after", "income_source", "is_conditional", "flags", "customer_declared_data",
+                "open_complaints", "open_priority_complaints", "open_critical_complaints", "required_documents",
+                "valid_until", "policy_version")
+FLAG_TEXT = {"F02_NEAR_LIMIT_DECLARED_INCOME": "cerca del límite del 20% con ingreso declarado",
+             "F03_DECLARED_DATA": "depende de datos declarados en el chat", "F04_OPEN_COMPLAINTS": "tiene reclamos abiertos"}
 ROUTE = {"ACCOUNT_DETAIL": "atencion_de_productos", "CASE_FOLLOWUP": "seguimiento_de_casos",
          "OTHER_TOPIC": "atencion_general", "UNCLEAR": "atencion_general"}
 TOPIC_ROUTE = {"account_inquiry": "atencion_de_productos", "case_status": "seguimiento_de_casos"}
@@ -111,10 +117,24 @@ def build_narrative(summary: dict) -> str:
     s = summary["sentiment"]
     if s["negative_turns"]:
         parts.append(f"Mostró molestia en {s['negative_turns']} de {s['turns']} mensajes.")
+    offer = summary.get("accepted_offer")
     ev = summary.get("evaluation")
-    if ev:
+    if offer:
+        flags = "; ".join(FLAG_TEXT.get(f, f) for f in offer["flags"])
+        parts.append(f"Aceptó la opción {offer['option_code']} a {offer['term_months']} meses por {offer['amount_usd']:,.0f} USD "
+                     f"(endeudamiento {offer['debt_to_income_after']:.1%}, política {offer['policy_version']})"
+                     + (f"; revisar: {flags}." if flags else "."))
+    elif ev:
         parts.append(f"Evaluación de crédito: {ev.get('outcome')}.")
     return " ".join(parts)
+
+
+def _offer(row: dict | None) -> dict | None:
+    if not row:
+        return None
+    out = {k: row.get(k) for k in OFFER_FIELDS}
+    out["valid_until"] = str(out["valid_until"]) if out["valid_until"] is not None else None
+    return out
 
 
 def build_summary(session: Session, ticket_id: str, created_at: str, reason: str, evaluation: dict | None,
@@ -144,7 +164,10 @@ def build_summary(session: Session, ticket_id: str, created_at: str, reason: str
             "products": context.get("products", []),
         },
         "request": session.slots.get("pending_request"),
-        "declared_income_unverified": session.slots.get("declared_income"),
+        # Lo que el cliente declaro en el chat (moneda local, SIN verificar): ingreso, ingreso y cuotas de alguien del hogar
+        "declared_unverified": dict(session.slots.get("declared") or {}),
+        "household_income_without_installments": session.slots.get("household_unknown_debt"),
+        "accepted_offer": _offer(session.slots.get("accepted_offer")),
         "application": session.slots.get("application"),
         "verified_facts": session.slots.get("verified_facts", []),
         "evaluation": evaluation,
