@@ -7,7 +7,10 @@ Dos caminos distintos que NO deben mezclarse:
     2. esta preaprobado por la politica con datos del banco (no con ingreso declarado en el chat);
     3. el momento es adecuado: sin sentimiento negativo, sin tema delicado (fraude, disputa, queja) y sin
        rechazo previo en la sesion;
-    4. no se ofrecio ya en esta sesion ni el cliente dijo que no.
+    4. no se ofrecio ya en esta sesion ni el cliente dijo que no;
+    5. al cliente no le queda nada pendiente: ni un tema de soporte en esta conversacion (producto, incidente, caso), ni una
+       derivacion, ni un caso critico abierto, ni un caso abierto reciente (agent/context.py). Antes se ofrecia credito justo
+       despues de derivar un problema; ahora primero se atiende lo que el cliente trajo.
 Es una decision en codigo: el LLM solo redacta el mensaje.
 
 LIMITE: el tope de frecuencia es por sesion (en memoria). En produccion debe persistirse (ultima oferta por cliente).
@@ -18,6 +21,7 @@ import logging
 from dataclasses import dataclass, field
 
 from app.agent import templates
+from app.agent.context import blocks_proactive_offer
 from app.agent.tools import DEFAULT_MONTHS, ToolContext, get_profile, offer_rates
 from app.core.fmt import fmt_money, fmt_pct
 from app.core.sessions import Session
@@ -33,6 +37,8 @@ ALREADY_OFFERED = "ALREADY_OFFERED"
 ALREADY_DECLINED = "ALREADY_DECLINED"
 RECENT_DECLINE = "RECENT_DECLINE"
 NOT_PREAPPROVED = "NOT_PREAPPROVED"
+SUPPORT_TOPIC = "SUPPORT_TOPIC"
+OPEN_CASE = "OPEN_CASE"
 
 
 @dataclass
@@ -51,6 +57,10 @@ def decide(session: Session, ctx: ToolContext) -> OfferDecision:
         return _no(ALREADY_OFFERED)
     if slots.get("no_offers"):
         return _no(NEGATIVE_MOMENT)
+    if slots.get("case") or session.handoff:
+        return _no(SUPPORT_TOPIC)
+    if blocks_proactive_offer(slots.get("context") or {}):
+        return _no(OPEN_CASE)
     last = slots.get("last_evaluation")
     if last and last["outcome"] in (ce.DECLINED, ce.NEEDS_REVIEW, ce.NEEDS_DATA):
         return _no(RECENT_DECLINE)

@@ -13,6 +13,9 @@ from __future__ import annotations
 PRIORITY_RANK = {"Critical": 4, "High": 3, "Medium": 2, "Low": 1}
 HIGH_PRIORITY = ("High", "Critical")
 NEGATIVE_SENTIMENT = ("Negativo", "Muy Negativo")
+# Un caso abierto mas viejo que esto sigue yendo al resumen del asesor, pero ya no se menciona al saludar ni frena una oferta:
+# en los datos hay reclamos "abiertos" desde hace anos (nadie los cerro) y saludar con uno suena absurdo.
+RECENT_DAYS = 180
 
 
 def case_weight(case: dict) -> int:
@@ -39,6 +42,7 @@ def build_context(cases: list[dict], products: list[dict]) -> dict:
         },
         "flags": {
             "has_open_case": bool(ranked),
+            "recent_open_case": any((c.get("days_open") or 0) <= RECENT_DAYS for c in ranked),
             "has_critical_open": any(c.get("priority") == "Critical" for c in ranked),
             "has_sla_breach": any(c.get("sla_breached") for c in ranked),
             "repeat_complainer": any(c.get("is_repeat_complainer") for c in ranked),
@@ -48,4 +52,12 @@ def build_context(cases: list[dict], products: list[dict]) -> dict:
     }
 
 
-EMPTY: dict = build_context([], [])
+def greeting_case(context: dict) -> dict | None:
+    """El caso que se menciona al saludar: el mas relevante de los recientes (RECENT_DAYS). None si no hay ninguno."""
+    return next((c for c in context.get("open_cases", []) if (c.get("days_open") or 0) <= RECENT_DAYS), None)
+
+
+def blocks_proactive_offer(context: dict) -> bool:
+    """Un caso critico abierto, o uno reciente sin cerrar, no es momento de ofrecer credito por iniciativa del banco."""
+    f = context.get("flags", {})
+    return bool(f.get("has_critical_open") or f.get("recent_open_case"))

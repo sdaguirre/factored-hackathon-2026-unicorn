@@ -33,16 +33,25 @@ REASON_TEXT = {
 T: dict[str, dict[str, str | list[str]]] = {
     # ---------------------------------------------------------------- presentacion e identidad
     "welcome": {
-        "es": "Hola {first_name}, soy el asistente virtual del banco. Puedo contarle sobre créditos, calcular cuánto le podríamos prestar o conectarlo con un asesor. ¿En qué le ayudo?",
-        "pt": "Olá {first_name}, sou o assistente virtual do banco. Posso falar sobre crédito, calcular quanto poderíamos emprestar ou conectar você a um consultor. Em que posso ajudar?",
+        "es": "Hola {first_name}, soy el asistente virtual del banco. Puedo ayudarle con consultas sobre sus productos, con créditos o conectarlo con un asesor. ¿En qué le ayudo?",
+        "pt": "Olá {first_name}, sou o assistente virtual do banco. Posso ajudar com consultas sobre seus produtos, com crédito ou conectar você a um consultor. Em que posso ajudar?",
+    },
+    # Cuando le quedo algo pendiente (caso abierto reciente): se reconoce primero, antes de cualquier otro tema.
+    "welcome_case": {
+        "es": "Hola {first_name}, soy el asistente virtual del banco. Veo {case} que sigue pendiente y quiero ayudarle con eso primero. ¿Quiere que le cuente lo que veo? Si prefiere otra cosa, dígamelo.",
+        "pt": "Olá {first_name}, sou o assistente virtual do banco. Vejo {case} que continua pendente e quero ajudar você com isso primeiro. Quer que eu conte o que vejo? Se preferir outra coisa, é só dizer.",
+    },
+    "case_skip": {
+        "es": "Claro, como prefiera. ¿En qué le ayudo?",
+        "pt": "Claro, como preferir. Em que posso ajudar?",
     },
     "greeting": {
         "es": ["Hola de nuevo, {first_name}. ¿Qué necesita?", "¡Hola! Dígame, {first_name}, ¿en qué le ayudo?"],
         "pt": ["Olá de novo, {first_name}. Do que você precisa?", "Oi! Diga, {first_name}, em que posso ajudar?"],
     },
     "identity": {
-        "es": "Soy el asistente virtual del banco: un programa de inteligencia artificial, no una persona. Puedo ayudarle con créditos y, si prefiere hablar con un asesor, lo conecto.",
-        "pt": "Sou o assistente virtual do banco: um programa de inteligência artificial, não uma pessoa. Posso ajudar com crédito e, se preferir falar com um consultor, eu conecto você.",
+        "es": "Soy el asistente virtual del banco: un programa de inteligencia artificial, no una persona. Puedo ayudarle con consultas sobre sus productos y con créditos y, si prefiere hablar con un asesor, lo conecto.",
+        "pt": "Sou o assistente virtual do banco: um programa de inteligência artificial, não uma pessoa. Posso ajudar com consultas sobre seus produtos e com crédito e, se preferir falar com um consultor, eu conecto você.",
     },
     # ---------------------------------------------------------------- conversacion general
     "thanks": {
@@ -58,10 +67,61 @@ T: dict[str, dict[str, str | list[str]]] = {
         "pt": ["Fico à disposição se precisar de mais alguma coisa. Tenha um ótimo dia!", "Estou por aqui se precisar. Tudo de bom!"],
     },
     "unknown": {
-        "es": ["Disculpe, no estoy seguro de haberle entendido. Puedo mostrarle ofertas de crédito, calcular si califica para un monto o conectarlo con un asesor. ¿Qué prefiere?",
-               "Perdone, no logré entenderle bien. ¿Quiere ver ofertas de crédito, simular un monto o hablar con un asesor?"],
-        "pt": ["Desculpe, não tenho certeza se entendi. Posso mostrar ofertas de crédito, calcular se você se qualifica para um valor ou conectar a um consultor. O que prefere?",
-               "Perdão, não consegui entender bem. Quer ver ofertas de crédito, simular um valor ou falar com um consultor?"],
+        "es": ["Disculpe, no estoy seguro de haberle entendido. Puedo ayudarle con sus productos, con el estado de un caso, con créditos o conectarlo con un asesor. ¿Qué prefiere?",
+               "Perdone, no logré entenderle bien. ¿Quiere consultar sus productos, ver un caso que tenga abierto, ver créditos o hablar con un asesor?"],
+        "pt": ["Desculpe, não tenho certeza se entendi. Posso ajudar com seus produtos, com o andamento de um caso, com crédito ou conectar a um consultor. O que prefere?",
+               "Perdão, não consegui entender bem. Quer consultar seus produtos, ver um caso em aberto, ver crédito ou falar com um consultor?"],
+    },
+    # ---------------------------------------------------------------- soporte: productos, casos e incidentes
+    # Solo se confirma que existe y se deriva el detalle. Nunca saldos, movimientos ni montos.
+    "products_found": {
+        "es": "Sí, veo {what} a su nombre. Por seguridad, el detalle de saldos y movimientos lo revisa un asesor. Si quiere, cuénteme qué necesita saber (producto, fecha, monto) y lo dejo anotado para que no tenga que repetirlo. ¿Lo conecto con un asesor?",
+        "pt": "Sim, vejo {what} em seu nome. Por segurança, o detalhe de saldos e movimentos é visto por um consultor. Se quiser, me conte o que precisa saber (produto, data, valor) e eu deixo anotado para que você não precise repetir. Conecto você a um consultor?",
+    },
+    "products_none": {
+        "es": "No veo {art} {noun} {adj} a su nombre. Si cree que debería aparecer, un asesor puede revisarlo. Cuénteme qué ocurre y lo dejo anotado para que no tenga que repetirlo. ¿Lo conecto con un asesor?",
+        "pt": "Não vejo {art} {noun} {adj} em seu nome. Se acha que deveria aparecer, um consultor pode revisar. Me conte o que está acontecendo e eu deixo anotado para que você não precise repetir. Conecto você a um consultor?",
+    },
+    "products_overview": {
+        "es": "Veo estos productos activos a su nombre: {what}. Por seguridad, el detalle de saldos y movimientos lo revisa un asesor. Cuénteme qué necesita saber y lo dejo anotado para que no tenga que repetirlo. ¿Lo conecto con un asesor?",
+        "pt": "Vejo estes produtos ativos em seu nome: {what}. Por segurança, o detalhe de saldos e movimentos é visto por um consultor. Me conte o que precisa saber e eu deixo anotado para que você não precise repetir. Conecto você a um consultor?",
+    },
+    "products_empty": {
+        "es": "No veo productos activos a su nombre en este momento. Un asesor puede revisar su caso. Cuénteme qué necesita y lo dejo anotado. ¿Lo conecto con un asesor?",
+        "pt": "No momento não vejo produtos ativos em seu nome. Um consultor pode revisar seu caso. Me conte o que precisa e eu deixo anotado. Conecto você a um consultor?",
+    },
+    "case_status_open": {
+        "es": "Veo {case}; su estado es {status}.{more} El detalle del avance lo maneja un asesor. Si quiere, cuénteme qué le gustaría saber y lo dejo anotado. ¿Lo conecto con un asesor?",
+        "pt": "Vejo {case}; o status é {status}.{more} O detalhe do andamento é tratado por um consultor. Se quiser, me conte o que gostaria de saber e eu deixo anotado. Conecto você a um consultor?",
+    },
+    "case_more": {
+        "es": " Además, tiene otros casos abiertos.",
+        "pt": " Além disso, você tem outros casos abertos.",
+    },
+    "case_status_none": {
+        "es": "No veo reclamos ni casos abiertos a su nombre en este momento. Si se trata de algo reciente, cuénteme qué ocurrió y lo dejo anotado para un asesor. ¿Quiere que lo conecte con uno?",
+        "pt": "No momento não vejo reclamações nem casos abertos em seu nome. Se for algo recente, me conte o que aconteceu e eu deixo anotado para um consultor. Quer que eu conecte você a um?",
+    },
+    "incident": {
+        "es": ["Lamento mucho lo ocurrido. Esto es importante y conviene que lo vea un asesor cuanto antes. Para que no tenga que repetirlo, cuénteme brevemente qué pasó (producto, fecha y monto, si los recuerda). ¿Lo conecto ahora con un asesor?",
+               "Siento lo que me cuenta; es un tema que debe revisar un asesor cuanto antes. Si puede, dígame qué pasó (producto, fecha, monto) y lo dejo anotado para que no lo repita. ¿Lo conecto ahora?"],
+        "pt": ["Lamento muito o ocorrido. Isso é importante e convém que um consultor veja o quanto antes. Para você não precisar repetir, me conte brevemente o que aconteceu (produto, data e valor, se lembrar). Conecto você agora a um consultor?",
+               "Sinto muito pelo que você conta; é um assunto que um consultor deve revisar o quanto antes. Se puder, me diga o que houve (produto, data, valor) e eu deixo anotado para você não repetir. Conecto você agora?"],
+    },
+    "detail_noted": {
+        "es": ["Anotado, gracias por contármelo. ¿Quiere que lo conecte ya con un asesor o desea agregar algo más?",
+               "Gracias, lo dejé anotado. ¿Lo conecto con un asesor ahora o quiere contarme algo más?"],
+        "pt": ["Anotado, obrigado por me contar. Quer que eu conecte você agora a um consultor ou deseja acrescentar algo?",
+               "Obrigado, deixei anotado. Conecto você a um consultor agora ou quer me contar mais alguma coisa?"],
+    },
+    "handoff_declined_support": {
+        "es": ["De acuerdo, no lo conecto por ahora. ¿Hay algo más en lo que le pueda ayudar?", "Sin problema, lo dejamos así. Si cambia de opinión, me avisa. ¿Algo más?"],
+        "pt": ["Certo, não conecto por enquanto. Posso ajudar em mais alguma coisa?", "Sem problema, deixamos assim. Se mudar de ideia, é só avisar. Algo mais?"],
+    },
+    # Se antepone al mensaje cuando el cliente se muestra molesto (no mas de una vez cada pocos turnos).
+    "empathy_negative": {
+        "es": ["Entiendo su molestia y lamento los inconvenientes.", "Lamento que esté pasando por esto."],
+        "pt": ["Entendo sua chateação e lamento o transtorno.", "Lamento que você esteja passando por isso."],
     },
     "ask_amount": {
         "es": ["¿Qué monto necesita para su {product}? Si quiere, dígame también el plazo en meses; si no, uso {months}.",
@@ -142,8 +202,10 @@ T: dict[str, dict[str, str | list[str]]] = {
         "pt": "Seu caso já está com um consultor; seu número de acompanhamento é {ticket}.",
     },
     "other_topic": {
-        "es": "Ese tema lo ve un asesor. ¿Quiere que lo conecte ahora?",
-        "pt": "Esse assunto é tratado por um consultor. Quer que eu conecte agora?",
+        "es": ["Ese tema lo atiende un asesor, pero con gusto le dejo todo anotado para que no tenga que repetirlo. Cuénteme qué necesita. ¿Lo conecto ahora?",
+               "Eso lo resuelve un asesor. Si quiere, cuénteme los detalles y los dejo anotados para que no tenga que repetirlos. ¿Lo conecto ahora?"],
+        "pt": ["Esse assunto é atendido por um consultor, mas com prazer deixo tudo anotado para você não precisar repetir. Me conte o que precisa. Conecto você agora?",
+               "Isso é resolvido por um consultor. Se quiser, me conte os detalhes e eu deixo anotados para você não precisar repetir. Conecto você agora?"],
     },
     # ---------------------------------------------------------------- oferta proactiva
     "offer_proactive": {
@@ -250,8 +312,11 @@ EMAIL_SUBJECT = {"es": "Resumen de su propuesta de crédito", "pt": "Resumo da s
 
 SUGGESTIONS = {
     "yes_no": {"es": ["Sí", "No"], "pt": ["Sim", "Não"]},
-    "start": {"es": ["Ver mi oferta de crédito", "Quiero un préstamo", "Hablar con un asesor"],
-              "pt": ["Ver minha oferta de crédito", "Quero um empréstimo", "Falar com um consultor"]},
+    "start": {"es": ["Consultar mis productos", "Ver mi oferta de crédito", "Hablar con un asesor"],
+              "pt": ["Consultar meus produtos", "Ver minha oferta de crédito", "Falar com um consultor"]},
+    # Al abrir con un caso pendiente: lo primero es ese caso.
+    "start_case": {"es": ["Sí, cuénteme", "Consultar mis productos", "Hablar con un asesor"],
+                   "pt": ["Sim, conte", "Consultar meus produtos", "Falar com um consultor"]},
 }
 
 
@@ -265,7 +330,8 @@ def render(kind: str, lang: str, fmt: dict[str, str], variant: int = 0) -> str:
 def render_facts(facts: dict, lang: str) -> str:
     """Texto base + (opcional) un segundo mensaje en la misma linea (p. ej. la pregunta de seguir) + bloques aparte."""
     v = facts.get("variant", 0)
-    text = render(facts["kind"], lang, facts["fmt"], v)
+    text = " ".join(render(p, lang, facts["fmt"], v) for p in facts.get("pre", []))
+    text = (text + " " if text else "") + render(facts["kind"], lang, facts["fmt"], v)
     if facts.get("kind2"):
         text += " " + render(facts["kind2"], lang, facts["fmt"], v)
     for extra in facts.get("extras", []):

@@ -53,7 +53,8 @@ def test_both_languages_have_every_template():
 
 def test_the_virtual_assistant_is_named_in_the_welcome_message_only():
     assert "asistente virtual" in templates.T["welcome"]["es"] and "assistente virtual" in templates.T["welcome"]["pt"]
-    repeats = [(k, i) for k, lang, i, t in _texts() if lang == "es" and k not in ("welcome", "identity") and "asistente virtual" in t]
+    repeats = [(k, i) for k, lang, i, t in _texts()
+               if lang == "es" and k not in ("welcome", "welcome_case", "identity") and "asistente virtual" in t]
     assert repeats == []                                               # el resto de mensajes no se vuelve a presentar
 
 

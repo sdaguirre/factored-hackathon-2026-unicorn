@@ -46,10 +46,19 @@ intento. Detalle en `backend/README.md`.
 
 ## Oferta proactiva
 
-Al cerrar la conversación o tras atender otro tema se ofrece un préstamo personal indicativo **solo si** el cliente acepta
-marketing, está preaprobado con datos del banco (no con ingreso declarado en el chat), no hubo sentimiento negativo ni
-tema delicado, no se le rechazó una solicitud y no se ofreció ya. Quien pide un crédito se evalúa **sin** mirar el
+Al cerrar la conversación se ofrece un préstamo personal indicativo **solo si** el cliente acepta marketing, está
+preaprobado con datos del banco (no con ingreso declarado en el chat), no hubo sentimiento negativo ni tema delicado, no
+se le rechazó una solicitud, no se ofreció ya y **no le queda nada pendiente** (ni un tema de soporte en la sesión, ni un
+caso crítico abierto, ni uno abierto en los últimos 180 días). Quien pide un crédito se evalúa **sin** mirar el
 consentimiento de marketing: ese consentimiento solo gobierna lo proactivo.
+
+## Soporte y contexto del cliente
+
+El agente atiende primero lo que el cliente trae. Al autenticar lee, una vez, sus casos abiertos y la existencia de sus
+productos (lista blanca de campos: nunca saldos, movimientos ni montos). Responde con datos verificados (que un producto
+existe, categoría, fecha y estado de un caso), anota lo que el cliente cuenta como declarado y ofrece conectar con un
+asesor; no deriva solo. El resumen para el asesor lleva ese contexto, el ánimo, una prioridad y una ruta sugeridas.
+Detalle y límites en `backend/README.md`.
 
 ## Idioma
 

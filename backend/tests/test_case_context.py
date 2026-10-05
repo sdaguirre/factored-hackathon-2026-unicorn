@@ -120,7 +120,7 @@ def test_customer_without_cases_has_empty_context(repo):
 
 
 def test_tool_records_a_trace_entry(repo):
-    tc = ToolContext("FXC-001", repo, {})
+    tc = ToolContext("FXC-011", repo, {})
     get_customer_context(tc)
     assert any(t["tool"] == "customer_context" and t["open_cases"] == 1 for t in tc.trace)
 

@@ -5,7 +5,7 @@ import logging
 
 from fastapi import APIRouter, Depends
 
-from app.agent import templates
+from app.agent import support, templates
 from app.agent.context import build_context
 from app.agent.tools import ToolContext, get_customer_context
 from app.api.schemas import (AuthState, CustomerSummary, QuestionOut, SessionCreate, SessionCreated, SessionInfo, VerifyRequest,
@@ -82,9 +82,13 @@ def verify(body: VerifyRequest, session: Session = Depends(require_session),
             log(logger, "context_unavailable", error=type(exc).__name__)
             session.slots["context"] = build_context([], [])
         state.lockout.register_success(session.doc_key)
-        greeting = templates.render("welcome", session.language, {"first_name": c.first_name})
+        # Si le quedo un caso pendiente reciente, se abre con eso y se espera su respuesta ("case_intro").
+        greeting, awaiting = support.welcome(session.language, c.first_name, session.slots["context"])
+        if awaiting:
+            session.slots["awaiting"] = awaiting
         return VerifyResponse(status="authenticated", attempts_left=s.auth_max_attempts - session.auth_attempts_used,
-                              greeting=greeting, suggested_replies=templates.SUGGESTIONS["start"][session.language],
+                              greeting=greeting,
+                              suggested_replies=templates.SUGGESTIONS["start_case" if awaiting else "start"][session.language],
                               customer=CustomerSummary(customer_id=c.customer_id, first_name=c.first_name, country=c.country,
                                                        segment=c.segment, status=c.customer_status))
 

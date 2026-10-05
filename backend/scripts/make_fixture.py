@@ -58,13 +58,14 @@ def month_start(d: date) -> date:
 
 # (cliente, origen, categoria, tipo, prioridad, estado, dias abierto, escalado, SLA incumplido, sentimiento, reincidente, canal)
 # Cada fila ejercita un camino de la conversacion: caso pendiente, caso critico, enojo previo, caso viejo, varios casos.
+# FXC-001 queda sin casos a proposito: es el cliente "limpio" (preaprobado, con consentimiento) de varias pruebas.
 CASES = [
-    (1, "complaint", "Fees", "Complaint", "High", "In Process", 12, False, False, None, False, "App"),
+    (11, "complaint", "Fees", "Complaint", "High", "In Process", 12, False, False, None, False, "App"),
     (2, "complaint", "Transactions", "Claim", "Critical", "Escalated", 31, True, True, None, True, "Call Center"),
     (2, "interaction", "Queja", None, None, "Unresolved", 9, True, False, "Muy Negativo", False, "Phone"),
     (3, "interaction", "Queja", None, None, "Unresolved", 20, False, False, "Negativo", False, "Phone"),
     (4, "interaction", "Transaccional", None, None, "Unresolved", 45, True, False, "Neutral", False, "Web Chat"),
-    (5, "complaint", "Service", "Complaint", "Low", "Open", 100, False, False, None, False, "Branch"),
+    (5, "complaint", "Service", "Complaint", "Low", "Open", 400, False, False, None, False, "Branch"),   # viejo: no se menciona al saludar
     (6, "complaint", "Technical", "Request", "Medium", "Open", 6, False, False, None, False, "Web"),
     (6, "interaction", "Técnico", None, None, "Unresolved", 3, False, False, "Neutral", False, "WhatsApp"),
 ]

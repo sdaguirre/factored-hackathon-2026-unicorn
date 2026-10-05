@@ -96,7 +96,8 @@ producto (en el 70% de los casos el producto es anterior al registro); por eso s
 - **Acciones con confirmación**: derivar a un humano solo ocurre tras un "sí" explícito (o si el cliente lo pide).
 - **Respuesta del LLM**: se descarta si contiene números que no están en los hechos calculados.
 - **Resumen de derivación**: solicitud, evaluación con versión de política, hechos verificados, acciones, preguntas
-  abiertas y los últimos mensajes. Sin cadena de pensamiento del modelo.
+  abiertas y los últimos mensajes. Sin cadena de pensamiento del modelo. Con contexto del cliente: ver "Soporte, contexto
+  y resumen para el asesor".
 
 Para usar Claude: `CHAT_LLM_PROVIDER=anthropic` y `ANTHROPIC_API_KEY` en `.env` (no entra en la imagen). Si la llamada
 falla o devuelve algo inválido, el turno cae al extractor por reglas.
@@ -106,10 +107,13 @@ falla o devuelve algo inválido, el turno cae al extractor por reglas.
 - Extrae intención y datos. El código contrasta montos y plazos con el texto original, y una **derivación a humano solo
   se acepta si el cliente la pidió de forma explícita**; un incidente (cargo no reconocido, fraude) pide confirmación.
 - Solo reescribe mensajes de bajo riesgo (saludo, cierre, preguntas de monto o ingreso, aceptación o rechazo de una
-  oferta). Las decisiones de crédito, las ofertas, las derivaciones y los avisos de simulación salen **siempre de la
+  oferta, y en soporte: tema ajeno, incidente, detalle anotado). Las decisiones de crédito, las ofertas, las derivaciones,
+  los avisos de simulación y **todo mensaje con hechos del banco** (productos, casos abiertos) salen **siempre de la
   plantilla revisada**: el guardia de números no detecta frases nuevas que cambien el compromiso. Se ajusta con
   `CHAT_LLM_REWRITE_KINDS` (lista por comas; `none` = el modelo nunca reescribe).
-- Su texto se descarta si trae números que no están en los hechos calculados.
+- Su texto se descarta si trae números que no están en los hechos calculados, si **promete** algo (resultado, plazo,
+  reembolso: "se resolverá", "le garantizo"…) o si, en un mensaje que espera respuesta (p. ej. "¿lo conecto?"), deja de
+  preguntarlo.
 
 Medición con `claude-haiku-4-5-20251001` (13 turnos, 5 conversaciones en es/pt, `scripts/e2e_llm.py`):
 18 llamadas, 0 caídas a reglas, latencia por llamada p50 ≈ 1,1 s y p95 ≈ 1,7 s, unos 490 tokens de entrada y 105 de
@@ -118,26 +122,37 @@ salida por turno. Es una muestra pequeña, no un benchmark. `scripts/smoke_llm.p
 ### Evaluación del NLU (intención, sentimiento, tema delicado)
 
 `python scripts/eval_nlu.py` mide el extractor por reglas y el modelo con frases en es/pt (`eval/nlu_cases.py`).
-Hay un conjunto de desarrollo (60 frases, usado para afinar el prompt y las reglas) y uno reservado (29 frases,
+Hay un conjunto de desarrollo (78 frases, usado para afinar el prompt y las reglas) y uno reservado (29 frases,
 escrito antes de afinar y medido una vez).
 
 | Conjunto | Reglas | Claude (claude-haiku-4-5) |
 |---|---|---|
-| Desarrollo (60), **optimista**: se afinó mirando estos fallos | 57/60 (95%) | 60/60 (100%) |
-| **Reservado (29)**, medido una vez, dos corridas del modelo | 23/29 (79%) | 28/29 y 27/29 (93–97%) |
+| Desarrollo (78), **optimista**: se afinó mirando estos fallos | 77/78 (99%) | **sin remedir** (ver abajo) |
+| **Reservado (29)**, ya visto: **no es limpio** (ver abajo) | 27/29 (93%) | 28/29 y 27/29 con el prompt anterior |
+
+**Cambio de taxonomía (soporte).** Se agregaron las intenciones `account_inquiry` (saldo, movimientos, qué productos
+tiene) y `case_status` (estado de un reclamo o caso ya abierto); un incidente sigue siendo `other_topic` con
+`sensitive_topic`. Por eso se **reetiquetaron 4 frases** (saldo/extracto → `account_inquiry`, "llevo semanas con un
+reclamo sin respuesta" → `case_status`) y se agregaron 13 al desarrollo. Al medir, "alguien usó mi tarjeta sin permiso"
+pasó de tema ajeno a `account_inquiry` (un reporte de fraude recibiría "sí veo su tarjeta"); se corrigió ampliando los
+marcadores de uso no autorizado en las reglas. **Esa corrección se hizo viendo una frase del reservado, así que el
+reservado ya no es limpio para las reglas.** El prompt de Claude también cambió (intenciones nuevas, tono, promesas) y
+**no se volvió a medir con el modelo real** (no hay clave en el entorno de desarrollo): hay que correr
+`python scripts/eval_nlu.py` con `ANTHROPIC_API_KEY` antes de citar una cifra del modelo.
 
 Antes de afinar, el modelo acertaba 49/60 (82%): confundía tasas y límites con otro tema en portugués y tomaba "no
 gracias" como despedida por no saber que había una pregunta pendiente (ahora se le informa). En el reservado, el único
 fallo constante era "necesito que me atienda una persona": lo degradaba la guardia de derivación explícita porque su
 léxico no la cubría; se amplió el léxico, pero **esa corrección se hizo mirando el reservado, así que esa cifra ya no
-es limpia**. Detección de tema sensible: 2/2 en el reservado y 5/5 en desarrollo, 0 falsos positivos. Límites: muestra
+es limpia**. Detección de tema sensible (reglas): 2/2 en el reservado y 9/10 en desarrollo, 0 falsos positivos. Límites: muestra
 pequeña, etiquetas de un solo anotador (el equipo debe revisarlas), y las dos corridas del modelo difieren en una frase.
 
 ## Oferta proactiva de crédito
 
-El chat ofrece un crédito por iniciativa del banco al **cerrar la conversación** ("gracias", "eso es todo") o **tras
-atender otro tema** (se deriva el tema y luego se ofrece). Es una decisión en código (`app/agent/proactive.py`); el LLM
-solo redacta el mensaje. La respuesta de `/messages` trae `proactive_offer: true` y `awaiting: "offer_interest"`.
+El chat ofrece un crédito por iniciativa del banco solo al **cerrar la conversación** ("gracias", "eso es todo"), y solo
+si no se atendió ningún tema de soporte en la sesión: **ya no se ofrece crédito justo después de derivar un problema**.
+Es una decisión en código (`app/agent/proactive.py`); el LLM solo redacta el mensaje. La respuesta de `/messages` trae
+`proactive_offer: true` y `awaiting: "offer_interest"`.
 
 | Camino | Qué mira | Qué NO mira |
 |---|---|---|
@@ -146,9 +161,33 @@ solo redacta el mensaje. La respuesta de `/messages` trae `proactive_offer: true
 
 Se ofrece solo si se cumplen **todas**: el cliente acepta marketing; está preaprobado por la política con datos del
 banco; no hubo sentimiento negativo ni tema delicado (fraude, disputa, reclamo, tarjeta robada, cargo no reconocido) en
-la sesión; no se le rechazó una solicitud en la sesión; y no se ofreció ya ni dijo que no. Si acepta, entra al flujo
-normal de elegibilidad; si rechaza, no se repite. La oferta queda en `actions_taken` y `verified_facts` del resumen de
-derivación para que el agente la vea.
+la sesión; no se le rechazó una solicitud en la sesión; y no se ofreció ya ni dijo que no. Además **no le queda nada
+pendiente**: ni un tema de soporte en esta conversación, ni una derivación, ni un caso **crítico** abierto, ni un caso
+abierto en los últimos 180 días. Si acepta, entra al flujo normal de elegibilidad; si rechaza, no se repite. La oferta
+queda en `actions_taken` y `verified_facts` del resumen de derivación para que el agente la vea.
+
+## Soporte, contexto y resumen para el asesor
+
+Antes de hablar de crédito, el agente atiende lo que el cliente trae. Reglas: **solo confirma que un producto existe y
+deriva el detalle**; nunca muestra saldos, movimientos, montos ni resoluciones.
+
+- **Contexto al autenticar** (`app/agent/context.py`, `sessions.verify`): casos abiertos del cliente (reclamos abiertos de
+  cualquier edad e interacciones sin resolver en 90 días; tabla gold `customer_case_context`, en el snapshot
+  `case_context.parquet`) y existencia de productos. El repositorio solo entrega una lista blanca de campos.
+- **Bienvenida**: si hay un caso abierto de **≤ 180 días**, abre con él ("Veo un reclamo sobre… ¿quiere que le cuente?");
+  los más antiguos no se mencionan (en los datos hay reclamos "abiertos" desde hace años) pero sí van al asesor.
+- **Intenciones de soporte**: `account_inquiry` (¿tengo una tarjeta?, mi saldo → confirma tipo y terminación y ofrece
+  derivar), `case_status` (categoría, fecha y estado del caso; el avance lo informa un asesor), incidentes (fraude,
+  cargo no reconocido: se reconoce, se pide lo básico y se ofrece conectar) y otros temas (se anota y se ofrece conectar).
+  Ninguno deriva solo: la derivación sigue exigiendo un "sí".
+- **Notas del cliente**: lo que cuenta mientras decide queda anotado como *declarado, sin verificar*. Números largos
+  (tarjetas, cuentas, documentos) y correos se omiten en las notas y en los últimos mensajes del resumen.
+- **Empatía**: si el cliente se muestra molesto, la respuesta abre reconociéndolo (no más de una vez cada 3 turnos).
+- **Resumen v2** (`GET /v1/sessions/{id}/handoff`, `GET /v1/handoffs`): además de lo anterior trae `topic`, `case_notes`,
+  `customer_context` (casos abiertos priorizados, conteos, banderas, productos), `sentiment` (curva y frustración),
+  `priority` (`normal|high|urgent`), `suggested_route`, `suggested_next_actions` y `narrative` (párrafo para leer de un
+  vistazo). La narrativa la escribe el código; si hay LLM, la suya la reemplaza solo si no agrega datos ajenos al
+  resumen ni promesas (`narrative_source`: `rules` o `llm`). Con el modelo real, esta ruta **no está probada**.
 
 Límites: el tope de una oferta por sesión no se persiste entre sesiones (hace falta guardar la última oferta por
 cliente); la oferta indica la capacidad máxima de la política (20% de endeudamiento), lo cual es agresivo para una
@@ -232,4 +271,5 @@ que se equivoca (derivación no pedida, reescritura de decisiones, números ajen
   falló por una descarga corrupta de un paquete (hash no coincidente) y funcionó al reintentar.
 - No hay límite de peticiones por IP ni protección contra concurrencia sobre una misma sesión.
 - Los logs no incluyen documentos, respuestas de seguridad ni cuerpos de petición; los mensajes del cliente sí se
-  guardan en memoria durante la sesión y se incluyen (últimos 8) en el resumen de derivación.
+  guardan en memoria durante la sesión y se incluyen (últimos 8, con números largos y correos omitidos) en el resumen de
+  derivación.

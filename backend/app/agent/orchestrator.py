@@ -10,14 +10,16 @@ import logging
 import re
 from dataclasses import dataclass, field
 
-from app.agent import documents, money, proactive, templates
+import json
+
+from app.agent import documents, money, proactive, support, templates
 from app.agent.evidence import build_evidence
 from app.agent.handoff import build_summary
 from app.agent.language import norm, parse_amounts, parse_months
 from app.agent.llm import LLM, MockLLM
 from app.agent.nlu import HUMAN_REQUEST, NLUResult
 from app.agent.tools import (DEFAULT_MONTHS, SUPPORTED_PRODUCTS, HandoffQueue, ToolContext, evaluate_credit,
-                             get_profile, new_ticket_id, offer_rates, utc_iso)
+                             get_customer_context, get_profile, new_ticket_id, offer_rates, utc_iso)
 from app.core.fmt import fmt_money, fmt_pct
 from app.core.pdf import render_summary_pdf
 from app.core.sessions import Session
@@ -29,7 +31,12 @@ MAX_REPLY_CHARS = 1200
 # Solo estos mensajes pueden ser reescritos por el LLM. Decisiones de credito, ofertas, derivaciones y avisos legales
 # salen siempre de la plantilla revisada: el guardia de numeros no detecta frases nuevas que cambien el compromiso.
 DEFAULT_REWRITE_KINDS = frozenset({"thanks", "closing", "goodbye", "unknown", "ask_amount", "ask_income",
-                                   "handoff_declined", "offer_declined", "offer_accepted"})
+                                   "handoff_declined", "offer_declined", "offer_accepted",
+                                   # soporte: tono, sin decisiones ni datos de la cuenta (los mensajes de productos y de casos
+                                   # llevan hechos del banco y salen siempre de la plantilla)
+                                   "other_topic", "incident", "detail_noted", "handoff_declined_support", "case_skip"})
+# Casos de soporte en curso: el cliente esta contando algo y la derivacion espera su confirmacion
+EMPATHY_EVERY_N_TURNS = 3
 
 
 @dataclass
@@ -67,12 +74,21 @@ _CLAIMS_HUMAN = re.compile(
     re.IGNORECASE)
 
 
+# Promesas que el asistente no puede cumplir (resultado, plazo, reembolso): un texto que las contenga se descarta siempre.
+_PROMISES = re.compile(
+    r"\b(garantiz\w*|garant[oi]\w*|prometo|prometemos|le aseguro|aseguro que|reembols\w*|devolver[ea]mos|devolveremos|"
+    r"devolvemos|compensar[ea]mos|resolver[ea]mos|solucionar[ea]mos|resolveremos|vamos a resolver|vamos a solucionar|"
+    r"vamos resolver|sera (resuelto|solucionado|resolvido)|se resolvera|se solucionara|se devolvera|lo antes posible|"
+    r"cuanto antes lo resuel\w*)\b")
+
+
 def safe_text(candidate: str, facts: dict) -> bool:
-    """Acepta el texto del LLM solo si no introduce numeros ajenos a los hechos, no se hace pasar por una persona y tiene
-    tamano razonable."""
+    """Acepta el texto del LLM solo si no introduce numeros ajenos a los hechos, no se hace pasar por una persona, no hace
+    promesas y tiene tamano razonable. Si el mensaje espera una respuesta (p. ej. '¿lo conecto?'), debe seguir preguntandolo."""
     allowed = _digit_runs(" ".join(facts.get("fmt", {}).values()))
     return (0 < len(candidate) <= MAX_REPLY_CHARS and _digit_runs(candidate) <= allowed
-            and not _CLAIMS_HUMAN.search(candidate))
+            and not _CLAIMS_HUMAN.search(candidate) and not _PROMISES.search(norm(candidate))
+            and (not facts.get("awaiting") or "?" in candidate))
 
 
 def validate_nlu(nlu: NLUResult, message: str) -> NLUResult:
@@ -108,9 +124,11 @@ class Orchestrator:
         ctx = ToolContext(session.customer_id, self.repo, self.policy)
         if nlu.sentiment == "negative" or nlu.sensitive_topic:
             session.slots["no_offers"] = True  # en toda la sesion: ninguna oferta comercial
+        session.slots.setdefault("sentiments", []).append(nlu.sentiment or "neutral")   # curva de animo para el resumen del asesor
 
         facts = self._dispatch(session, ctx, nlu, message)
         facts["variant"] = len(session.history) // 2        # rota las formulaciones de los mensajes de bajo riesgo
+        self._empathy(session, nlu, facts)
         reply = self._render(facts, lang)
         reply.evidence = build_evidence(ctx.trace, facts)
         session.history.append({"role": "assistant", "text": reply.reply})
@@ -118,6 +136,16 @@ class Orchestrator:
             awaiting=facts.get("awaiting"), proactive=reply.proactive_offer, llm=self.llm.name,
             llm_rewritten=reply.llm_rewritten, lang=lang)
         return reply
+
+    @staticmethod
+    def _empathy(session: Session, nlu: NLUResult, facts: dict) -> None:
+        """Si el cliente se muestra molesto, el mensaje abre reconociendolo (una frase fija revisada). No se repite en cada
+        turno: seria artificial. Los incidentes ya traen su propio reconocimiento."""
+        turn = len(session.history) // 2
+        if (nlu.sentiment == "negative" and facts["kind"] not in ("incident", "handoff_created", "application_ready")
+                and turn - session.slots.get("empathy_turn", -EMPATHY_EVERY_N_TURNS) >= EMPATHY_EVERY_N_TURNS):
+            facts["pre"] = ["empathy_negative"]
+            session.slots["empathy_turn"] = turn
 
     def _understand(self, session: Session, message: str) -> NLUResult:
         pending = session.slots.get("awaiting") in ("confirm_handoff", "offer_interest")  # hay una pregunta de si/no
@@ -141,15 +169,21 @@ class Orchestrator:
             return self._facts("currency_unsupported", intent, awaiting=awaiting, ccy=mention.unsupported,
                                supported=", ".join(money.SUPPORTED))
 
-        if awaiting == "confirm_handoff":
+        if awaiting == "case_intro":                              # abrimos con un caso pendiente: "¿quiere que le cuente?"
             if intent == "confirm_yes":
-                reason = session.slots.pop("handoff_reason", "USER_REQUEST")
-                facts = self._handoff(session, reason)
-                return self._with_offer(session, ctx, facts) if reason == "OTHER_TOPIC" else facts
+                return self._support_case_status(session, ctx, intent, "")     # el "si" no es un dato del caso: no se anota
+            if intent == "confirm_no":
+                return self._facts("case_skip", intent, suggest="start")
+        if awaiting == "confirm_handoff":
+            # Ya no se encadena una oferta de credito tras atender otro tema: el cliente vino por otra cosa.
+            if intent == "confirm_yes":
+                return self._handoff(session, session.slots.pop("handoff_reason", "USER_REQUEST"))
             if intent == "confirm_no":
                 reason = session.slots.pop("handoff_reason", "USER_REQUEST")
-                facts = self._facts("handoff_declined", intent)
-                return self._with_offer(session, ctx, facts) if reason == "OTHER_TOPIC" else facts
+                return self._facts("handoff_declined_support" if reason in support.SUPPORT_REASONS else "handoff_declined", intent)
+            # Cuenta mas detalles en vez de decir si/no: se anotan (un tema generico o ininteligible no cambia el motivo).
+            if session.slots.get("case") and (intent == "unknown" or (intent == "other_topic" and not nlu.sensitive_topic)):
+                return self._collect_detail(session, message)
         if awaiting == "offer_interest":
             if intent == "confirm_yes":
                 session.slots["pending_request"] = {"product": "personal_loan", "amount": None,
@@ -186,8 +220,14 @@ class Orchestrator:
             return self._facts("greeting", intent, first_name=session.first_name or "", suggest="start")
         if intent in ("thanks", "closing"):
             return self._close_turn(session, ctx, intent)
+        if intent == "case_status":
+            return self._support_case_status(session, ctx, intent, message)
+        if nlu.sensitive_topic and intent in ("other_topic", "account_inquiry"):
+            return self._support_incident(session, intent, message)
+        if intent == "account_inquiry":
+            return self._support_account(session, ctx, intent, message)
         if intent == "other_topic":
-            return self._offer_handoff(session, "OTHER_TOPIC", intent, kind="other_topic")
+            return self._support_other(session, intent, message)
         if intent == "credit_offers":
             return self._offers(session, ctx)
         if intent == "credit_eligibility":
@@ -213,6 +253,52 @@ class Orchestrator:
         facts["fmt"].update(d.fmt)
         facts.update(awaiting="offer_interest", suggest="yes_no", proactive_offer=True)
         return facts
+
+    # ------------------------------------------------------------------ soporte (productos, casos, incidentes, otros temas)
+    # Regla comun: el agente responde lo que puede con datos verificados del banco (existencia de productos, casos abiertos),
+    # anota lo que el cliente cuenta como DECLARADO y solo ofrece conectar con un asesor; la derivacion se ejecuta con un "si".
+    def _support(self, session: Session, topic: str, reason: str, kind: str, intent: str, message: str,
+                 family: str | None = None, **fmt: str) -> dict:
+        support.add_note(session.slots, topic, message, family)
+        session.slots["awaiting"] = "confirm_handoff"
+        session.slots["handoff_reason"] = reason
+        return self._facts(kind, intent, awaiting="confirm_handoff", suggest="yes_no", **fmt)
+
+    def _support_account(self, session: Session, ctx: ToolContext, intent: str, message: str) -> dict:
+        """'¿Tengo una tarjeta?', 'mi saldo': confirma que el producto existe (tipo y terminacion) y deriva el detalle."""
+        context = get_customer_context(ctx)
+        session.slots["context"] = context
+        family, hint = support.mentioned_family(message)
+        kind, data = support.product_answer(context["products"], family, hint, session.language)
+        return self._support(session, "account_inquiry", "ACCOUNT_DETAIL", kind, intent, message, family, **data)
+
+    def _support_case_status(self, session: Session, ctx: ToolContext, intent: str, message: str) -> dict:
+        """Lo que el banco ve del caso abierto mas relevante (categoria, fecha, estado). El avance lo informa un asesor."""
+        context = get_customer_context(ctx)
+        session.slots["context"] = context
+        top, lang = context["most_relevant"], session.language
+        if top is None:
+            return self._support(session, "case_status", "CASE_FOLLOWUP", "case_status_none", intent, message)
+        more = templates.render("case_more", lang, {}) if context["counts"]["open"] > 1 else ""
+        return self._support(session, "case_status", "CASE_FOLLOWUP", "case_status_open", intent, message,
+                             case=support.case_phrase(top, lang), status=support.status_text(top, lang), more=more)
+
+    def _support_incident(self, session: Session, intent: str, message: str) -> dict:
+        """Fraude, cargo no reconocido, robo, reclamo nuevo: se reconoce, se pide lo basico para el asesor y se ofrece conectar."""
+        family, _ = support.mentioned_family(message)
+        return self._support(session, "incident", "INCIDENT", "incident", intent, message, family)
+
+    def _support_other(self, session: Session, intent: str, message: str) -> dict:
+        """Tema que el asistente no resuelve (horarios, claves, app...): se anota lo que cuenta y se ofrece conectar."""
+        return self._support(session, "other", "OTHER_TOPIC", "other_topic", intent, message)
+
+    def _collect_detail(self, session: Session, message: str) -> dict:
+        """El cliente conto mas detalles en lugar de responder si/no: se anotan y se vuelve a preguntar por la derivacion."""
+        session.unknown_streak = 0
+        case = support.add_note(session.slots, session.slots["case"]["topic"], message)
+        session.slots["awaiting"] = "confirm_handoff"        # la razon de la derivacion sigue en slots["handoff_reason"]
+        session.actions.append({"type": "customer_detail_noted", "notes": len(case["notes"]), "verified": False})
+        return self._facts("detail_noted", "unknown", awaiting="confirm_handoff", suggest="yes_no")
 
     # ------------------------------------------------------------------ casos
     def _eligibility(self, session: Session, ctx: ToolContext, nlu: NLUResult, mention: money.CurrencyMention) -> dict:
@@ -543,11 +629,37 @@ class Orchestrator:
             "APPLICATION_READY": ["Verificar los documentos que el cliente declaro tener y el ingreso; completar la revision final"],
             "DOCS_INCOMPLETE": ["Ayudar al cliente a completar la documentacion pendiente: "
                                 + ", ".join((session.slots.get("application") or {}).get("missing", []))],
+            "ACCOUNT_DETAIL": ["Atender la consulta sobre el producto: el cliente pidio detalle (saldos o movimientos) que el "
+                               "asistente no muestra; el asistente solo confirmo que el producto existe"],
+            "INCIDENT": ["Atender un incidente que reporta el cliente (fraude, cargo no reconocido, robo u otro): validar los "
+                         "hechos y tomar las medidas de seguridad que correspondan"],
+            "CASE_FOLLOWUP": ["Informar al cliente el avance de su caso abierto (el asistente solo le dijo categoria, fecha y estado)"],
+            "OTHER_TOPIC": ["Atender el tema que el cliente describio (ver case_notes); el asistente no lo resuelve"],
         }.get(reason, ["Revisar el caso segun el motivo indicado"])
+        if reason == "USER_REQUEST" and session.slots.get("case"):   # pidio un humano en medio de un tema: retomarlo
+            questions = ["Retomar el tema que el cliente describio en el chat (ver case_notes y topic)"]
         session.actions.append({"type": "handoff_created", "ticket_id": ticket, "verified": True, "at": now})
         session.handoff = {"ticket_id": ticket, "created_at": now, "reason": reason}
-        self.queue.add(build_summary(session, ticket, now, reason, session.slots.get("last_evaluation"), questions))
+        summary = build_summary(session, ticket, now, reason, session.slots.get("last_evaluation"), questions)
+        self._improve_narrative(summary)
+        self.queue.add(summary)
         return self._facts("handoff_created", "request_human", outcome="handed_off", ticket=ticket, handoff_ticket=ticket)
+
+    def _improve_narrative(self, summary: dict) -> None:
+        """Si hay LLM, su parrafo reemplaza al de reglas SOLO si no introduce datos ajenos al resumen ni promesas. Un fallo
+        o un texto invalido deja el parrafo determinista: el asesor siempre recibe un resumen util."""
+        summarize = getattr(self.llm, "summarize", None)
+        if summarize is None:
+            return
+        try:
+            candidate = summarize(summary)
+        except Exception as exc:
+            log(logger, "summary_fallback", error=type(exc).__name__)
+            return
+        allowed = _digit_runs(json.dumps(summary, ensure_ascii=False, default=str))
+        if (candidate and len(candidate) <= 900 and _digit_runs(candidate) <= allowed
+                and not _PROMISES.search(norm(candidate)) and not _CLAIMS_HUMAN.search(candidate)):
+            summary["narrative"], summary["narrative_source"] = candidate, "llm"
 
     # ------------------------------------------------------------------ salida
     @staticmethod
