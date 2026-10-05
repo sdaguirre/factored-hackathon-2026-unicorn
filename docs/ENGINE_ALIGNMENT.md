@@ -11,7 +11,7 @@ exactly what gold computes, and the tools that are ready to help.
 | Piece | Where | Status |
 |---|---|---|
 | Gold profile and offer options (150,000 customers, 1.8M options) | `workspace.gold_latam_bank` | Built with policy 0.3 |
-| Local export of gold + `ref_*` to Parquet | `data/scripts/export_gold.py` → `.local/gold/` (git-ignored) | ~6 minutes, run once (static data) |
+| Parquet export of gold + `ref_*` for serving | Written by the jobs to `workspace.gold_latam_bank.exports` (`gold/95_export_for_serving.py`); `data/scripts/export_gold.py` downloads it to `.local/gold/` (git-ignored) | Production export available (2026-06-30 cutoff, policy 0.3) |
 | Reference implementation of the policy in Python | `data/policy/credit_policy.py` | Matches gold on all 1.8M options |
 | Parity check for any engine | `data/scripts/check_engine_parity.py` | 0 mismatches for the reference |
 | Unit tests on the worked example (no organizer data) | `data/policy/test_credit_policy.py` | 12 passing |
@@ -21,7 +21,7 @@ The reference module is standard library only and pure: `load_policy()`, `offer_
 executable spec.
 
 ```bash
-python data/scripts/export_gold.py --profile <profile> --warehouse-id <id>
+python data/scripts/export_gold.py --profile <profile>     # download the export
 python data/scripts/check_engine_parity.py                 # reference engine vs gold
 pytest data/policy                                         # worked example
 ```
@@ -46,7 +46,7 @@ pytest data/policy                                         # worked example
 ## Changes by file
 
 1. **Data (`backend/scripts/build_snapshot.py`, `app/data/repository.py`).** Join the snapshot
-   customers with `.local/gold/customer_credit_profile.parquet` instead of
+   customers with the downloaded export (`.local/gold/customer_credit_profile/`, a Parquet folder) instead of
    `.local/derived/gold_customer_credit_profile.parquet`, and keep the offer options of the
    sampled customers. `credit_profile()` returns the gold profile row (USD) instead of
    `monthly_income` / `existing_monthly_debt` in local currency.
