@@ -45,12 +45,22 @@ class VerifyRequest(BaseModel):
     answers: list[VerifyAnswer] = Field(min_length=1, max_length=10)
 
 
+class CustomerSummary(BaseModel):
+    """Datos basicos del cliente ya autenticado (los mismos que usa el agente). Sin documento ni datos financieros."""
+    customer_id: str
+    first_name: str
+    country: str | None = None
+    segment: str | None = None
+    status: str | None = None
+
+
 class VerifyResponse(BaseModel):
     status: Literal["authenticated", "failed"]
     attempts_left: int
     questions: list[QuestionOut] | None = Field(default=None, description="Nuevo reto cuando status=failed.")
     greeting: str | None = None
     suggested_replies: list[str] = []
+    customer: CustomerSummary | None = Field(default=None, description="Solo cuando status=authenticated.")
 
 
 class MessageRequest(BaseModel):
@@ -64,6 +74,27 @@ class EmailInfo(BaseModel):
     id: str
 
 
+class EvidenceStep(BaseModel):
+    id: str = Field(description="customer_profile | fx_rates | credit_policy | offer_rates | handoff | summary_email")
+    type: Literal["database", "tool", "validation"]
+    status: Literal["success", "failed"]
+    data: dict = {}
+
+
+class Verification(BaseModel):
+    code: str = Field(description="customer_data | policy | income_declared | rates | fx")
+    status: Literal["verified", "inconclusive", "unverified", "reference"]
+    detail: str | None = None
+
+
+class Evidence(BaseModel):
+    """Lo que el agente hizo de verdad en este turno. Ausente (null) si no uso ninguna herramienta."""
+    steps: list[EvidenceStep]
+    verification: list[Verification] = Field(description="Vacio si alguna herramienta fallo: la respuesta no esta verificada.")
+    customer: dict | None = Field(default=None, description="Perfil leido de los datos del banco, si respaldo la respuesta.")
+    evaluation: dict | None = Field(default=None, description="Evaluacion de politica de credito ejecutada en este turno.")
+
+
 class MessageResponse(BaseModel):
     reply: str
     language: Literal["es", "pt"]
@@ -75,6 +106,7 @@ class MessageResponse(BaseModel):
     proactive_offer: bool = Field(default=False, description="True si la respuesta incluye una oferta proactiva de credito.")
     summary_ready: bool = Field(default=False, description="True si la respuesta incluye el resumen final de la propuesta (hay PDF descargable).")
     email: EmailInfo | None = Field(default=None, description="Correo con el PDF del resumen (simulado en el prototipo).")
+    evidence: Evidence | None = None
     trace_id: str
 
 

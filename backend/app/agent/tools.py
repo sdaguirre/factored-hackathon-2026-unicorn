@@ -21,6 +21,9 @@ class ToolContext:
     customer_id: str
     repo: CustomerRepository
     policy: dict
+    # Llamadas reales a herramientas de ESTE turno. Alimenta la "evidencia" que muestra la interfaz (ver agent/evidence.py):
+    # solo se registra lo que de verdad se ejecuto.
+    trace: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -33,12 +36,26 @@ class EvalResult:
 
 
 def get_profile(ctx: ToolContext) -> dict:
-    return ctx.repo.credit_profile(ctx.customer_id)
+    profile = ctx.repo.credit_profile(ctx.customer_id)
+    ctx.trace.append({"tool": "customer_profile", "profile": profile})
+    return profile
 
 
 def evaluate_credit(ctx: ToolContext, product: str, amount: float, months: int,
-                    declared_income: float | None = None) -> EvalResult:
-    """Corre el motor determinista. Un ingreso declarado muy superior al registrado va a revision humana."""
+                    declared_income: float | None = None, record: bool = True) -> EvalResult:
+    """Corre el motor determinista. Un ingreso declarado muy superior al registrado va a revision humana.
+
+    `record=False` para consultas internas (p. ej. la sonda de capacidad de `offer_rates`), que no son una evaluacion
+    de lo que pidio el cliente y no deben presentarse como tal."""
+    res = _evaluate_credit(ctx, product, amount, months, declared_income)
+    if record:
+        ctx.trace.append({"tool": "credit_policy", "request": res.request, "decision": res.decision, "ccy": res.ccy,
+                          "income_declared": res.income_declared, "max_dti": ctx.policy["max_dti"]})
+    return res
+
+
+def _evaluate_credit(ctx: ToolContext, product: str, amount: float, months: int,
+                     declared_income: float | None) -> EvalResult:
     profile = get_profile(ctx)
     on_file = profile["monthly_income"]
     income = declared_income if declared_income is not None else on_file
@@ -65,12 +82,14 @@ def evaluate_credit(ctx: ToolContext, product: str, amount: float, months: int,
 def offer_rates(ctx: ToolContext, declared_income: float | None = None) -> dict:
     """Tasas de referencia por producto para la banda del cliente, y capacidad maxima de un prestamo personal."""
     profile = get_profile(ctx)
-    probe = evaluate_credit(ctx, "personal_loan", 1.0, DEFAULT_MONTHS["personal_loan"], declared_income)
+    probe = evaluate_credit(ctx, "personal_loan", 1.0, DEFAULT_MONTHS["personal_loan"], declared_income, record=False)
     band = probe.decision.band
     rates = {}
     if band is not None and band not in ctx.policy["no_lending_bands"]:
         for p in ("personal_loan", "mortgage", "credit_card"):
             rates[p] = ce.annual_rate(p, band, profile["n_active_products"], ctx.policy)
+    ctx.trace.append({"tool": "offer_rates", "rates": dict(rates), "max_amount": probe.decision.max_amount,
+                      "ccy": profile["income_ccy"], "policy_version": ctx.policy["version"]})
     return {"rates": rates, "probe": probe, "ccy": profile["income_ccy"]}
 
 

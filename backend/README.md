@@ -50,6 +50,12 @@ GET  /health  ·  GET /v1/meta
 - Los errores tienen siempre la forma `{"error": {"code", "message", "trace_id"}}`. Códigos: `INVALID_API_KEY`,
   `INVALID_TOKEN`, `SESSION_EXPIRED`, `AUTH_REQUIRED`, `AUTH_LOCKED`, `AUTH_UNAVAILABLE`, `MESSAGE_TOO_LONG`,
   `VALIDATION_ERROR`, `NO_HANDOFF`, `SESSION_ENDED`, `NO_SUMMARY`, `INTERNAL_ERROR`.
+- `verify` devuelve además `customer` (id, nombre, país, segmento, estado: sin documento ni datos financieros) al autenticar.
+- `messages` y `end` devuelven `evidence` **solo si el agente usó herramientas en ese turno** (`null` en un saludo o un
+  agradecimiento): `steps[]` (herramientas ejecutadas de verdad y su estado), `verification[]` (`verified`, `inconclusive`,
+  `unverified` para datos declarados por el cliente, `reference` para tasas de referencia), `customer` (perfil leído) y
+  `evaluation` (evaluación de política de este turno). Se arma en `app/agent/evidence.py` desde las llamadas reales a
+  `tools.py`; si una herramienta falla, `verification` va vacío. La interfaz solo pinta esto: no infiere verificaciones.
 - Cada respuesta lleva `X-Trace-Id` (se acepta uno entrante) para correlacionar con los logs JSON.
 - Un sitio web externo debe llamar a esta API **desde su servidor**: una `X-API-Key` en el navegador no es secreta.
   Para llamadas directas desde el navegador, configure `CHAT_CORS_ORIGINS` y trate la clave como identificador.

@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from app.agent import templates
-from app.api.schemas import (AuthState, QuestionOut, SessionCreate, SessionCreated, SessionInfo, VerifyRequest,
+from app.api.schemas import (AuthState, CustomerSummary, QuestionOut, SessionCreate, SessionCreated, SessionInfo, VerifyRequest,
                              VerifyResponse)
 from app.auth import kba
 from app.core.security import make_session_token
@@ -72,7 +72,9 @@ def verify(body: VerifyRequest, session: Session = Depends(require_session),
         state.lockout.register_success(session.doc_key)
         greeting = templates.render("welcome", session.language, {"first_name": c.first_name})
         return VerifyResponse(status="authenticated", attempts_left=s.auth_max_attempts - session.auth_attempts_used,
-                              greeting=greeting, suggested_replies=templates.SUGGESTIONS["start"][session.language])
+                              greeting=greeting, suggested_replies=templates.SUGGESTIONS["start"][session.language],
+                              customer=CustomerSummary(customer_id=c.customer_id, first_name=c.first_name, country=c.country,
+                                                       segment=c.segment, status=c.customer_status))
 
     session.auth_attempts_used += 1
     locked = state.lockout.register_failure(session.doc_key)

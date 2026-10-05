@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass, field
 
 from app.agent import documents, money, proactive, templates
+from app.agent.evidence import build_evidence
 from app.agent.handoff import build_summary
 from app.agent.language import norm, parse_amounts, parse_months
 from app.agent.llm import LLM, MockLLM
@@ -44,6 +45,7 @@ class ChatReply:
     proactive_offer: bool = False
     summary_ready: bool = False          # la respuesta incluye el resumen final de la propuesta
     email: dict | None = None            # correo con el PDF (SIMULADO en el prototipo): {to, status, id}
+    evidence: dict | None = None         # lo que el agente hizo de verdad en el turno (agent/evidence.py); None si no uso herramientas
 
 
 def _conv_dict(c: money.Conversion) -> dict:
@@ -110,6 +112,7 @@ class Orchestrator:
         facts = self._dispatch(session, ctx, nlu, message)
         facts["variant"] = len(session.history) // 2        # rota las formulaciones de los mensajes de bajo riesgo
         reply = self._render(facts, lang)
+        reply.evidence = build_evidence(ctx.trace, facts)
         session.history.append({"role": "assistant", "text": reply.reply})
         log(logger, "turn", intent=nlu.intent, kind=facts["kind"], outcome=facts.get("outcome"),
             awaiting=facts.get("awaiting"), proactive=reply.proactive_offer, llm=self.llm.name,
@@ -412,6 +415,7 @@ class Orchestrator:
         session.slots["ended"] = True
         facts["variant"] = len(session.history) // 2
         reply = self._render(facts, session.language)
+        reply.evidence = build_evidence(ctx.trace, facts)
         session.history.append({"role": "assistant", "text": reply.reply})
         return reply
 
@@ -445,6 +449,7 @@ class Orchestrator:
         facts["fmt"].update(fmt)
         facts["extras"] = ["summary", "email_notice" if fmt["email"] else "email_notice_noaddr"]
         facts["summary"] = True
+        facts["income_declared"] = bool(session.slots["last_evaluation"].get("income_declared_unverified"))   # la propuesta se baso en un ingreso sin verificar
         record = self._queue_email(session, ctx, fmt)
         if record:
             facts["email"] = {"to": fmt["email"] or None, "status": record["status"], "id": record["id"]}
@@ -486,7 +491,10 @@ class Orchestrator:
             return value, None, None
         conv = money.convert(self.repo, value, spoken, local)
         if conv is None:
+            ctx.trace.append({"tool": "fx_rates", "status": "failed", "src": spoken, "dst": local})
             return value, None, spoken                    # sin tasa disponible: se avisa, no se inventa
+        ctx.trace.append({"tool": "fx_rates", "status": "success", "src": spoken, "dst": local,
+                          "rate": conv.quote.rate, "as_of": conv.quote.as_of})
         session.slots["spoken_ccy"] = spoken
         # Los equivalentes se muestran con la MISMA tasa de esta conversion: las tasas directa e inversa del dataset no son
         # exactamente reciprocas y, si no, pedir 1.000 USD se mostraria como "≈ 1.023 USD" al volver.

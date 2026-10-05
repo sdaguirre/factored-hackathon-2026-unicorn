@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Header, Response
 
 from app.agent.orchestrator import ChatReply
-from app.api.schemas import EmailInfo, MessageRequest, MessageResponse
+from app.api.schemas import EmailInfo, Evidence, MessageRequest, MessageResponse
 from app.core.security import api_key_valid
 from app.core.sessions import Session
 from app.deps import AppState, current_trace_id, get_state, require_api_key, require_authenticated
@@ -29,7 +29,8 @@ def _response(r: ChatReply) -> MessageResponse:
     return MessageResponse(reply=r.reply, language=r.language, intent=r.intent, outcome=r.outcome, awaiting=r.awaiting,
                            suggested_replies=r.suggested_replies, handoff_ticket=r.handoff_ticket,
                            proactive_offer=r.proactive_offer, summary_ready=r.summary_ready,
-                           email=EmailInfo(**r.email) if r.email else None, trace_id=current_trace_id())
+                           email=EmailInfo(**r.email) if r.email else None, evidence=Evidence(**r.evidence) if r.evidence else None,
+                           trace_id=current_trace_id())
 
 
 @router.post("/sessions/{session_id}/end", response_model=MessageResponse)
