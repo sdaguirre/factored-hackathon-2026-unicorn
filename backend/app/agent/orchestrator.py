@@ -62,6 +62,7 @@ class ChatReply:
     summary_ready: bool = False          # la respuesta incluye el resumen final de la propuesta
     email: dict | None = None            # correo con el PDF (SIMULADO en el prototipo): {to, status, id}
     evidence: dict | None = None         # lo que el agente hizo de verdad en el turno (agent/evidence.py); None si no uso herramientas
+    disclaimer: str | None = None        # "simulation" (la respuesta presenta una oferta) | "final" (resumen de la oferta final)
 
 
 def _conv_dict(c: money.Conversion) -> dict:
@@ -115,6 +116,26 @@ def validate_nlu(nlu: NLUResult, message: str) -> NLUResult:
         upd["intent"] = "other_topic" if nlu.sensitive_topic else "unknown"
     return nlu.model_copy(update=upd) if upd else nlu
 
+
+
+# Respuestas que presentan cifras de una oferta: la interfaz las encabeza con el aviso de simulacion.
+OFFER_KINDS = frozenset({"offers", "offer_featured", "offer_featured_card", "offer_proactive", "offer_proactive_card",
+                         "eligible", "eligible_card", "eligible_provisional", "eligible_card_provisional"})
+
+
+def disclaimer_for(facts: dict) -> str | None:
+    if facts.get("summary"):
+        return "final"
+    if facts.get("proactive_offer") or facts["kind"] in OFFER_KINDS or facts.get("kind2") in OFFER_KINDS:
+        return "simulation"
+    return None
+
+
+def fmt_dti(share: float) -> str:
+    """Debt-to-income truncated to one decimal: an offer at the limit (19.99%) must not read as 20.0%."""
+    import math
+
+    return fmt_pct(math.floor(share * 1000) / 10)
 
 class Orchestrator:
     def __init__(self, repo, policy: eng.Policy, rules: dict, llm: LLM, queue: HandoffQueue,
@@ -356,8 +377,9 @@ class Orchestrator:
             return self._facts("fx_unavailable", "update_income", awaiting="income", ccy=err)
         self._declared(session)["income"] = inc
         session.slots["declared_income_conv"] = conv
-        if session.slots.get("pending_request", {}).get("amount"):
-            return self._evaluate(session, ctx, "update_income")  # recalculo inmediato con el dato nuevo
+        if session.slots.get("pending_request", {}).get("product"):
+            # recalculo inmediato con el dato nuevo; sin monto, la opcion mas alta del producto que ya pidio
+            return self._evaluate(session, ctx, "update_income")
         return self._facts("income_saved", "update_income", income=self._m(session, inc, profile["local_currency"]),
                            fx=self._fx_note(session))
 
@@ -453,7 +475,7 @@ class Orchestrator:
             kind = ("eligible" + card) if q.outcome == eng.ELIGIBLE else ("eligible_card_provisional" if card else "eligible_provisional")
             facts = self._facts(kind, intent, outcome=q.outcome, product=label,
                                 amount=self._m(session, req["amount"], ccy), months=str(q.term_months),
-                                payment=L(q.installment_usd), rate=fmt_pct(q.rate_pct), dti=fmt_pct(q.dti_after * 100),
+                                payment=L(q.installment_usd), rate=fmt_pct(q.rate_pct), dti=fmt_dti(q.dti_after),
                                 max_dti=max_dti, fx=self._fx_note(session))
             if can_ask:
                 return self._ask_household(session, facts)
@@ -702,7 +724,7 @@ class Orchestrator:
             "product": templates.product_label(req["product"], ev.get("tier"), lang),
             "amount": self._m(session, req["amount"], ccy), "months": str(ev["request"]["months"]),
             "rate": fmt_pct(ev["rate_pct"]), "payment": self._m(session, ev["payment"], ccy, 2),
-            "dti": fmt_pct(ev["dti_after"] * 100), "max_dti": fmt_pct(self.policy.max_dti * 100),
+            "dti": fmt_dti(ev["dti_after"]), "max_dti": fmt_pct(self.policy.max_dti * 100),
             "status": tx["provisional"] if ev["outcome"] == eng.ELIGIBLE_PROVISIONAL else tx["eligible"],
             "docs_status": docs_status, "ticket": ticket, "ticket_line": tx["ticket_line"].format(ticket=ticket) if ticket else "",
             "email": email,
@@ -872,4 +894,5 @@ class Orchestrator:
                          handoff_ticket=facts.get("handoff_ticket"), suggested_replies=sug,
                          awaiting=facts.get("awaiting"), llm_rewritten=rewritten,
                          proactive_offer=facts.get("proactive_offer", False),
-                         summary_ready=bool(facts.get("summary")), email=facts.get("email"))
+                         summary_ready=bool(facts.get("summary")), email=facts.get("email"),
+                         disclaimer=disclaimer_for(facts))

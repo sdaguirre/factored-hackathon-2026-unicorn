@@ -305,7 +305,7 @@
     return node;
   }
 
-  // role: "user" | "assistant". opts: {offer, uncertain, evidence}
+  // role: "user" | "assistant". opts: {offer, uncertain, evidence, disclaimer}
   function addMessage(role, text, opts) {
     opts = opts || {};
     var at = new Date();
@@ -314,7 +314,7 @@
       return pushMessage(track(build(), build));
     }
     var buildAgent = function () {
-      var m = UNI.agentMessage(text, { offer: opts.offer, uncertain: opts.uncertain, at: at });
+      var m = UNI.agentMessage(text, { offer: opts.offer, uncertain: opts.uncertain, disclaimer: opts.disclaimer, at: at });
       UNI.fillEvidence(m.extras, opts.evidence);
       return m.root;
     };
@@ -468,7 +468,7 @@
         var d = r.data;
         applyEvidence(d.evidence);
         var uncertain = d.awaiting === "confirm_handoff" || d.outcome === "needs_review" || d.outcome === "needs_data";
-        addMessage("assistant", d.reply, { offer: d.proactive_offer, uncertain: uncertain, evidence: d.evidence });
+        addMessage("assistant", d.reply, { offer: d.proactive_offer, uncertain: uncertain, evidence: d.evidence, disclaimer: d.disclaimer });
         addHandoff(d.handoff_ticket);
         if (d.summary_ready) { state.hasSummary = true; addSummaryCard(d.email); }
         showSuggestions(d.suggested_replies || []);

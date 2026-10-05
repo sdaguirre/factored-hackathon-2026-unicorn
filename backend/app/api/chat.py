@@ -29,7 +29,7 @@ def _response(r: ChatReply) -> MessageResponse:
     return MessageResponse(reply=r.reply, language=r.language, intent=r.intent, outcome=r.outcome, awaiting=r.awaiting,
                            suggested_replies=r.suggested_replies, handoff_ticket=r.handoff_ticket,
                            proactive_offer=r.proactive_offer, summary_ready=r.summary_ready,
-                           email=EmailInfo(**r.email) if r.email else None, evidence=Evidence(**r.evidence) if r.evidence else None,
+                           email=EmailInfo(**r.email) if r.email else None, evidence=Evidence(**r.evidence) if r.evidence else None, disclaimer=r.disclaimer,
                            trace_id=current_trace_id())
 
 
