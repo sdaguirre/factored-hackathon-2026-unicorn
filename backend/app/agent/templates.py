@@ -38,8 +38,8 @@ T: dict[str, dict[str, str | list[str]]] = {
     },
     # Cuando le quedo algo pendiente (caso abierto reciente): se reconoce primero, antes de cualquier otro tema.
     "welcome_case": {
-        "es": "Hola {first_name}, soy el asistente virtual del banco. Veo {case} que sigue pendiente y quiero ayudarle con eso primero. ¿Quiere que le cuente lo que veo? Si prefiere otra cosa, dígamelo.",
-        "pt": "Olá {first_name}, sou o assistente virtual do banco. Vejo {case} que continua pendente e quero ajudar você com isso primeiro. Quer que eu conte o que vejo? Se preferir outra coisa, é só dizer.",
+        "es": "Hola {first_name}, soy el asistente virtual del banco. Veo {case}{pending} y quiero ayudarle con eso primero. ¿Quiere que le cuente lo que veo? Si prefiere otra cosa, dígamelo.",
+        "pt": "Olá {first_name}, sou o assistente virtual do banco. Vejo {case}{pending} e quero ajudar você com isso primeiro. Quer que eu conte o que vejo? Se preferir outra coisa, é só dizer.",
     },
     "case_skip": {
         "es": "Claro, como prefiera. ¿En qué le ayudo?",

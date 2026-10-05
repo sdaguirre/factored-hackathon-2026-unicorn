@@ -53,8 +53,10 @@ def mentioned_family(text: str) -> tuple[str | None, str | None]:
     return family, hint
 
 
-def _item(p: dict, lang: str) -> str:
-    return f"{PRODUCT_LABELS[lang].get(p['type'], p['type'])} ({TERMINATION[lang]} {p['last4']})"
+def _item(p: dict, lang: str, article: bool = False) -> str:
+    label = PRODUCT_LABELS[lang].get(p["type"], p["type"])
+    art = f"{ART[lang][GENDER[p['type']][lang]]} " if article and p["type"] in GENDER else ""
+    return f"{art}{label} ({TERMINATION[lang]} {p['last4']})"
 
 
 def product_answer(products: list[dict], family: str | None, hint: str | None, lang: str) -> tuple[str, dict]:
@@ -66,7 +68,7 @@ def product_answer(products: list[dict], family: str | None, hint: str | None, l
         return "products_overview", {"what": templates.join_list([_item(p, lang) for p in active], lang)}
     found = [p for p in active if FAMILY_OF.get(p["type"]) == family and (hint is None or p["type"] == hint)]
     if found:
-        return "products_found", {"what": templates.join_list([_item(p, lang) for p in found], lang)}
+        return "products_found", {"what": templates.join_list([_item(p, lang, article=True) for p in found], lang)}
     noun, gender = (PRODUCT_LABELS[lang][hint], GENDER[hint][lang]) if hint else FAMILY_NAME[lang][family]
     return "products_none", {"art": ART[lang][gender], "noun": noun, "adj": ADJ[lang][gender]}
 
@@ -89,6 +91,7 @@ STATUS = {
     "pt": {"Open": "aberto", "In Process": "em andamento", "Escalated": "encaminhado a uma área especializada", "Unresolved": "pendente de solução"},
 }
 _SINCE = {"es": "desde el", "pt": "desde"}
+_PENDING = {"es": " que sigue pendiente", "pt": " que continua pendente"}
 _ON = {"es": "del", "pt": "de"}
 
 
@@ -113,7 +116,10 @@ def welcome(lang: str, first_name: str, context: dict) -> tuple[str, str | None]
     """(texto de bienvenida, 'case_intro' si abre con un caso pendiente reciente). Las plantillas son de texto fijo."""
     case = greeting_case(context)
     if case:
-        return templates.render("welcome_case", lang, {"first_name": first_name, "case": case_phrase(case, lang)}), "case_intro"
+        # la frase de una llamada ya dice "que quedo sin resolver"; la de un reclamo necesita decir que sigue pendiente
+        pending = "" if case["case_source"] == "interaction" else _PENDING[lang]
+        return templates.render("welcome_case", lang, {"first_name": first_name, "case": case_phrase(case, lang),
+                                                       "pending": pending}), "case_intro"
     return templates.render("welcome", lang, {"first_name": first_name}), None
 
 

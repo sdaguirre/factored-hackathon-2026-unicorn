@@ -101,6 +101,14 @@ def test_welcome_opens_with_a_recent_open_case(client, state):
     assert not any(w in r["reply"].lower() for w in CREDIT_WORDS)
 
 
+def test_welcome_phrasing_is_grammatical_for_a_call_and_for_a_complaint(client, state):
+    _, _, call = start(client, state, "FXC-003")                 # llamada sin resolver hace 20 dias
+    g = call["greeting"]
+    assert "que quedó sin resolver y quiero ayudarle" in g and "que sigue pendiente" not in g
+    _, _, complaint = start(client, state, "FXC-011")            # reclamo
+    assert "desde el 05/06/2026 que sigue pendiente y quiero ayudarle" in complaint["greeting"]
+
+
 def test_welcome_can_be_skipped_without_pushing_anything(client, state):
     sid, h, _ = start(client, state, "FXC-011")
     r = say(client, sid, h, "no, gracias")
@@ -139,7 +147,7 @@ def test_asking_for_a_product_confirms_it_exists_and_hands_the_detail_to_an_advi
     r = say(client, sid, h, "¿tengo una tarjeta de crédito?")
     last4 = [p["last4"] for p in state.repo.products(cid) if p["product_type"] == "Tarjeta Crédito"][0]
     assert r["intent"] == "account_inquiry" and r["awaiting"] == "confirm_handoff"
-    assert "tarjeta de crédito" in r["reply"] and f"terminación {last4}" in r["reply"] and "asesor" in r["reply"]
+    assert f"Sí, veo una tarjeta de crédito (terminación {last4})" in r["reply"] and "asesor" in r["reply"]
 
 
 def test_a_missing_product_is_reported_honestly(client, state):
@@ -198,6 +206,35 @@ def test_incident_is_acknowledged_with_empathy_and_goes_up_as_urgent(client, sta
     s = summary_of(client, sid, h)
     assert (s["priority"], s["suggested_route"], s["reason"]) == ("urgent", "fraudes_y_disputas", "INCIDENT")
     assert s["topic"]["primary"] == "incident" and "300 dólares" in s["case_notes"][0]["text"]
+
+
+def test_a_complaint_without_fraud_signals_is_high_priority_not_a_fraud_emergency(client, state):
+    sid, h, _ = start(client, state, "FXC-001")
+    say(client, sid, h, "me siguen cobrando una comisión que no entiendo, quiero hacer un reclamo")
+    say(client, sid, h, "sí")
+    s = summary_of(client, sid, h)
+    assert (s["reason"], s["priority"], s["suggested_route"]) == ("INCIDENT", "high", "reclamos_y_quejas")
+
+
+def test_next_actions_only_mention_waiting_time_when_there_is_an_open_case(client, state):
+    sid, h, _ = start(client, state, "FXC-001")                  # sin casos abiertos
+    say(client, sid, h, "esto es pésimo, estoy muy molesto, quiero hacer un reclamo")
+    say(client, sid, h, "sí")
+    s = summary_of(client, sid, h)
+    actions = " ".join(s["suggested_next_actions"])
+    assert "molestia" in actions and "espera" not in actions and "lleva con su caso" not in actions
+    sid2, h2, _ = start(client, state, "FXC-002")                # con casos abiertos
+    say(client, sid2, h2, "esto es pésimo, estoy muy molesto, quiero hacer un reclamo")
+    say(client, sid2, h2, "sí")
+    assert "lleva con su caso abierto" in " ".join(summary_of(client, sid2, h2)["suggested_next_actions"])
+
+
+def test_an_open_critical_case_makes_any_handoff_urgent(client, state):
+    sid, h, _ = start(client, state, "FXC-002")
+    say(client, sid, h, "me siguen cobrando una comisión que no entiendo, quiero hacer un reclamo")
+    say(client, sid, h, "sí")
+    s = summary_of(client, sid, h)
+    assert s["priority"] == "urgent" and s["suggested_route"] == "reclamos_y_quejas"      # urgente por el caso, ruta por el tema
 
 
 def test_other_topics_are_noted_without_rushing_the_customer_or_selling(client, state):
@@ -320,6 +357,27 @@ def test_llm_narrative_replaces_the_rules_one_only_if_it_adds_nothing_new(client
         say(client, sid2, h2, "quiero hablar con un asesor")
         s2 = summary_of(client, sid2, h2)
         assert s2["narrative_source"] == "rules" and "Motivo:" in s2["narrative"]
+
+
+def test_the_model_sees_products_as_bank_verified_and_never_the_case_ids(client, state):
+    """El resumen que recibe Claude marca los productos como verificados (antes los omitia y el modelo escribio que una
+    tarjeta 'no estaba verificada') y no lleva identificadores ni datos de la cuenta."""
+    from app.agent.llm_anthropic import SYSTEM_SUMMARY, AnthropicLLM
+
+    sid, h, _ = start(client, state, "FXC-002")
+    say(client, sid, h, "necesito el saldo de mi cuenta")
+    say(client, sid, h, "sí")
+    summary = summary_of(client, sid, h)
+    seen = {}
+    llm = object.__new__(AnthropicLLM)                              # sin cliente ni red
+    llm._call = lambda system, user, max_tokens: seen.update(system=system, user=user) or "ok"
+    before = json.dumps(summary, sort_keys=True)
+    llm.summarize(summary)
+    payload = json.loads(seen["user"])
+    assert payload["customer_context"]["products_verified_by_bank"] and "case_id" not in seen["user"]
+    assert "customer_id" not in seen["user"] and "FXC-002" not in seen["user"]
+    assert json.dumps(summary, sort_keys=True) == before            # no modifica el resumen original
+    assert "VERIFICADOS" in SYSTEM_SUMMARY and "No infieras" in SYSTEM_SUMMARY
 
 
 def test_a_failing_narrator_falls_back_to_the_rules_paragraph(client, state):

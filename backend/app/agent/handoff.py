@@ -7,6 +7,9 @@ de la conversacion, prioridad y ruta sugeridas. `narrative` es un parrafo corto 
 """
 from __future__ import annotations
 
+import re
+
+from app.agent.language import norm
 from app.agent.support import redact, status_text
 from app.core.sessions import Session
 
@@ -23,9 +26,18 @@ REASON_LABEL = {
 }
 CREDIT_REASONS = frozenset({"MISSING_DATA", "INCOME_UPLIFT_REVIEW", "UNSUPPORTED_PRODUCT", "POLICY_DECLINED",
                             "APPLICATION_READY", "DOCS_INCOMPLETE"})
-ROUTE = {"INCIDENT": "fraudes_y_disputas", "ACCOUNT_DETAIL": "atencion_de_productos", "CASE_FOLLOWUP": "seguimiento_de_casos",
+ROUTE = {"ACCOUNT_DETAIL": "atencion_de_productos", "CASE_FOLLOWUP": "seguimiento_de_casos",
          "OTHER_TOPIC": "atencion_general", "UNCLEAR": "atencion_general"}
-TOPIC_ROUTE = {"incident": "fraudes_y_disputas", "account_inquiry": "atencion_de_productos", "case_status": "seguimiento_de_casos"}
+TOPIC_ROUTE = {"account_inquiry": "atencion_de_productos", "case_status": "seguimiento_de_casos"}
+# Senales de fraude o uso no autorizado en lo que el cliente conto. Un incidente sin ellas (una queja por una comision, por
+# ejemplo) es importante pero no es una urgencia de seguridad: no va a "fraudes" ni sube a urgente por si solo.
+_FRAUD = re.compile(r"(fraude|fraud|robo|robaron|roubo|roubaram|estafa|golpe|clon|no reconozco|nao reconheco|"
+                    r"sin (mi )?(permiso|autorizacion)|sem (a )?(minha )?(permissao|autorizacao)|usaron mi|usou meu|usaram meu|"
+                    r"hackea|suplant|perdi|extravi)")
+
+
+def _fraud_signal(case: dict | None) -> bool:
+    return bool(case and _FRAUD.search(norm(" ".join(n["text"] for n in case["notes"]))))
 
 
 def _sentiment(session: Session, flags: dict) -> dict:
@@ -40,17 +52,19 @@ def _sentiment(session: Session, flags: dict) -> dict:
     return {"turns": len(seq), "negative_turns": negative, "last": seq[-1] if seq else None, "frustration": level}
 
 
-def _priority(reason: str, ctx: dict, sentiment: dict) -> str:
+def _priority(reason: str, ctx: dict, sentiment: dict, case: dict | None) -> str:
     flags, counts = ctx.get("flags", {}), ctx.get("counts", {})
-    if reason == "INCIDENT" or flags.get("has_critical_open"):
+    if flags.get("has_critical_open") or (reason == "INCIDENT" and _fraud_signal(case)):
         return "urgent"
-    if (sentiment["frustration"] == "high" or counts.get("high_priority") or flags.get("has_sla_breach")
-            or flags.get("repeat_complainer")):
+    if (reason == "INCIDENT" or sentiment["frustration"] == "high" or counts.get("high_priority")
+            or flags.get("has_sla_breach") or flags.get("repeat_complainer")):
         return "high"
     return "normal"
 
 
 def _route(reason: str, case: dict | None, has_credit: bool) -> str:
+    if reason == "INCIDENT" or (reason == "USER_REQUEST" and case and case["topic"] == "incident"):
+        return "fraudes_y_disputas" if _fraud_signal(case) else "reclamos_y_quejas"
     if reason in ROUTE:
         return ROUTE[reason]
     if reason in CREDIT_REASONS:
@@ -64,7 +78,8 @@ def _next_actions(reason: str, ctx: dict, case: dict | None, sentiment: dict) ->
     out: list[str] = []
     flags = ctx.get("flags", {})
     if sentiment["frustration"] != "none":
-        out.append("Abrir reconociendo la molestia del cliente y el tiempo que lleva esperando.")
+        # solo se habla de espera si hay un caso abierto que la respalde; si no, seria afirmar algo que el dato no dice
+        out.append("Abrir reconociendo la molestia del cliente" + (" y el tiempo que lleva con su caso abierto." if ctx.get("open_cases") else "."))
     if ctx.get("open_cases"):
         out.append("Revisar primero el caso abierto más relevante antes de ofrecer otros productos.")
     if flags.get("has_sla_breach"):
@@ -114,7 +129,7 @@ def build_summary(session: Session, ticket_id: str, created_at: str, reason: str
         "reason": reason,
         "customer": {"customer_id": session.customer_id, "country": session.country, "language": session.language,
                      "authenticated": True, "auth_method": "kba_transactions_and_account_opening"},
-        "priority": _priority(reason, context, sentiment),
+        "priority": _priority(reason, context, sentiment, case),
         "suggested_route": _route(reason, case, bool(session.slots.get("pending_request"))),
         "sentiment": sentiment,
         "topic": {"primary": case["topic"], "all": list(case["topics"]), "families": list(case["families"])} if case else None,
