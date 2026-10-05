@@ -23,7 +23,11 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import StructType, StructField, StringType
 
 LANDING_BASE = "dbfs:/Volumes/workspace/staging_latam_bank/landing"
-BRONZE_SCHEMA = "workspace.bronze_latam_bank_test"
+# Schema destino como parámetro (catálogo.schema). En un Job, el parámetro
+# bronze_schema del job llega acá como widget; a mano, se cambia en el
+# widget de arriba del notebook. Default: el schema de prueba.
+dbutils.widgets.text("bronze_schema", "workspace.bronze_latam_bank_test")
+BRONZE_SCHEMA = dbutils.widgets.get("bronze_schema")
 
 # Todas las entidades encontradas en el landing volume (confirmado
 # 2026-10-04 vía %fs ls). Si agregan una carpeta nueva, hay que sumarla

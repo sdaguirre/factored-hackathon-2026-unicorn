@@ -1,15 +1,16 @@
 -- =============================================================================================
 -- customer_credit_offer_options: baseline offer per customer and term-grid option.
--- Daily task of the credit_gold_daily job; runs after customer_credit_profile.
+-- Task of the latam_bank_medallion and credit_policy_refresh jobs; runs after customer_credit_profile.
+-- Parameters :silver_schema (ref_*) and :gold_schema (profile, fn_*), catalog.schema.
 -- Policy and formulas: docs/CREDIT_RULES.md. Synthetic policy, offline results.
 -- =============================================================================================
 
-CREATE OR REPLACE TABLE workspace.gold_latam_bank.customer_credit_offer_options
+CREATE OR REPLACE TABLE IDENTIFIER(:gold_schema || '.customer_credit_offer_options')
 COMMENT 'Baseline pre-approved offer per customer and product option (ref_term_grid row: loan term or card tier). Options are alternatives: each uses the whole 20% capacity. Rate = reference rate + band and segment adjustments, clamped to the product range. Loans: any amount in the product range, at terms up to the band maximum. Cards: the tier credit limit range. Maximum amount = what the available installment can repay, capped by the range. Indicative only; the rules service recomputes when the customer gives new data. Amounts in USD and local currency.'
 AS
 WITH catalog AS (
     SELECT product_code, min_amount_usd, max_amount_usd, min_rate_pct, max_rate_pct
-    FROM workspace.silver_latam_bank.ref_product_catalog
+    FROM IDENTIFIER(:silver_schema || '.ref_product_catalog')
 ),
 priced AS (
     SELECT
@@ -39,14 +40,14 @@ priced AS (
             ELSE true END                                 AS term_allowed,
         g.reference_rate_pct,
         least(greatest(g.reference_rate_pct + p.total_rate_adjustment_pp, c.min_rate_pct), c.max_rate_pct) AS offer_rate_pct
-    FROM workspace.gold_latam_bank.customer_credit_profile p
-    CROSS JOIN workspace.silver_latam_bank.ref_term_grid g
+    FROM IDENTIFIER(:gold_schema || '.customer_credit_profile') p
+    CROSS JOIN IDENTIFIER(:silver_schema || '.ref_term_grid') g
     JOIN catalog c ON c.product_code = split(g.product_code, '-')[0]
 ),
 sized AS (
     SELECT
         *,
-        workspace.gold_latam_bank.fn_max_principal(greatest(coalesce(available_installment_usd, 0), 0), offer_rate_pct, term_months) AS max_amount_by_capacity_usd
+        IDENTIFIER(:gold_schema || '.fn_max_principal')(greatest(coalesce(available_installment_usd, 0), 0), offer_rate_pct, term_months) AS max_amount_by_capacity_usd
     FROM priced
 ),
 capped AS (
@@ -79,12 +80,12 @@ SELECT
          WHEN capped_amount_usd < option_min_amount_usd    THEN 'capacity_below_option_minimum' END AS unavailable_reason,
     CASE WHEN is_available THEN capped_amount_usd END                          AS offer_max_amount_usd,
     CASE WHEN is_available
-         THEN round(workspace.gold_latam_bank.fn_monthly_installment(capped_amount_usd, offer_rate_pct, term_months), 2) END AS offer_monthly_installment_usd,
+         THEN round(IDENTIFIER(:gold_schema || '.fn_monthly_installment')(capped_amount_usd, offer_rate_pct, term_months), 2) END AS offer_monthly_installment_usd,
     local_currency,
     fx_to_usd,
     CASE WHEN is_available THEN round(capped_amount_usd / fx_to_usd, 0) END   AS offer_max_amount_local,
     CASE WHEN is_available
-         THEN round(workspace.gold_latam_bank.fn_monthly_installment(capped_amount_usd, offer_rate_pct, term_months) / fx_to_usd, 0) END AS offer_monthly_installment_local,
+         THEN round(IDENTIFIER(:gold_schema || '.fn_monthly_installment')(capped_amount_usd, offer_rate_pct, term_months) / fx_to_usd, 0) END AS offer_monthly_installment_local,
     risk_band,
     segment,
     as_of_date,

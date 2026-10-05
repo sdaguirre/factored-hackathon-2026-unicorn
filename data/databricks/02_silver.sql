@@ -1,4 +1,3 @@
--- Databricks notebook source
 -- =====================================================================
 -- 02_silver — Tipado explícito + dedup desde las tablas bronze (todo
 -- STRING) a tablas silver con tipos reales.
@@ -6,18 +5,18 @@
 -- Correr DESPUÉS de 01_bronze. No toca ref_product_catalog ni
 -- ref_term_grid (esas se mantienen aparte con scripts/load_reference.py).
 --
--- Los nombres de schema están hardcodeados abajo como
--- workspace.bronze_latam_bank_test / workspace.silver_latam_bank_test
--- (los widgets de Databricks no son confiables en compute Serverless SQL
--- Warehouse). Una vez validado acá, hacé buscar-y-reemplazar en VS Code:
---   bronze_latam_bank_test -> bronze_latam_bank
---   silver_latam_bank_test -> silver_latam_bank
--- antes de correrlo contra el schema real.
+-- Archivo SQL (no notebook) para correr como tarea SQL de un Job sobre un
+-- SQL warehouse. Parámetros con nombre (schema completo, catálogo.schema):
+--   :bronze_schema  ej. workspace.bronze_latam_bank_test | workspace.bronze_latam_bank
+--   :silver_schema  ej. workspace.silver_latam_bank_test | workspace.silver_latam_bank
+-- El mismo archivo corre contra _test o contra los schemas reales, sin
+-- buscar-y-reemplazar. A mano: abrirlo en el SQL editor (pide los valores)
+-- o data/scripts/run_databricks_sql.py --param bronze_schema=... --param silver_schema=...
 -- =====================================================================
 
 -- COMMAND ----------
 
-CREATE SCHEMA IF NOT EXISTS workspace.silver_latam_bank_test;
+CREATE SCHEMA IF NOT EXISTS IDENTIFIER(:silver_schema);
 
 -- COMMAND ----------
 -- 1) branches
@@ -25,7 +24,7 @@ CREATE SCHEMA IF NOT EXISTS workspace.silver_latam_bank_test;
 -- así que el dedup usa esa.
 -- COMMAND ----------
 
-CREATE OR REPLACE TABLE workspace.silver_latam_bank_test.branches AS
+CREATE OR REPLACE TABLE IDENTIFIER(:silver_schema || '.branches') AS
 SELECT
     branch_id,
     branch_code,
@@ -51,7 +50,7 @@ SELECT
     geographic_zone,
     _bronze_ingested_at,
     current_timestamp() AS _silver_processed_at
-FROM workspace.bronze_latam_bank_test.branches
+FROM IDENTIFIER(:bronze_schema || '.branches')
 WHERE branch_id IS NOT NULL   -- prevención: nunca dejar que una clave nula colapse filas en el QUALIFY
 QUALIFY ROW_NUMBER() OVER (PARTITION BY branch_id ORDER BY _bronze_ingested_at DESC) = 1;
 
@@ -63,7 +62,7 @@ QUALIFY ROW_NUMBER() OVER (PARTITION BY branch_id ORDER BY _bronze_ingested_at D
 -- como STRING sin parsear hasta confirmar el formato real).
 -- COMMAND ----------
 
-CREATE OR REPLACE TABLE workspace.silver_latam_bank_test.call_center_interactions
+CREATE OR REPLACE TABLE IDENTIFIER(:silver_schema || '.call_center_interactions')
 PARTITIONED BY (process_date) AS
 SELECT
     interaction_id,
@@ -89,7 +88,7 @@ SELECT
     agent_used_accent,  -- STRING: confirmado NO es boolean, viene como texto (ej. 'colombian')
     _bronze_ingested_at,
     current_timestamp() AS _silver_processed_at
-FROM workspace.bronze_latam_bank_test.call_center_interactions
+FROM IDENTIFIER(:bronze_schema || '.call_center_interactions')
 WHERE interaction_id IS NOT NULL
 QUALIFY ROW_NUMBER() OVER (PARTITION BY interaction_id ORDER BY process_date DESC) = 1;
 
@@ -97,7 +96,7 @@ QUALIFY ROW_NUMBER() OVER (PARTITION BY interaction_id ORDER BY process_date DES
 -- 3) campaign_sends
 -- COMMAND ----------
 
-CREATE OR REPLACE TABLE workspace.silver_latam_bank_test.campaign_sends
+CREATE OR REPLACE TABLE IDENTIFIER(:silver_schema || '.campaign_sends')
 PARTITIONED BY (process_date) AS
 SELECT
     send_id,
@@ -124,7 +123,7 @@ SELECT
     CAST(send_cost AS DOUBLE) AS send_cost,
     _bronze_ingested_at,
     current_timestamp() AS _silver_processed_at
-FROM workspace.bronze_latam_bank_test.campaign_sends
+FROM IDENTIFIER(:bronze_schema || '.campaign_sends')
 WHERE send_id IS NOT NULL
 QUALIFY ROW_NUMBER() OVER (PARTITION BY send_id ORDER BY process_date DESC, send_date DESC) = 1;
 
@@ -133,7 +132,7 @@ QUALIFY ROW_NUMBER() OVER (PARTITION BY send_id ORDER BY process_date DESC, send
 -- (mismo patrón que ya veníamos usando directo en gold; ahora vive acá)
 -- COMMAND ----------
 
-CREATE OR REPLACE TABLE workspace.silver_latam_bank_test.complaints
+CREATE OR REPLACE TABLE IDENTIFIER(:silver_schema || '.complaints')
 PARTITIONED BY (process_date) AS
 SELECT
     complaint_id,
@@ -161,19 +160,21 @@ SELECT
     CAST(compensation_granted AS DOUBLE) AS compensation_granted,
     CAST(resolution_satisfaction AS DOUBLE) AS resolution_satisfaction,
     CAST(is_repeat_complainer AS BOOLEAN) AS is_repeat_complainer,
-    CAST(creation_date AS DATE) AS creation_date,
+    CAST(creation_date AS TIMESTAMP) AS creation_date,  -- TIMESTAMP: conserva la hora
     CAST(process_date AS DATE) AS process_date,
     _bronze_ingested_at,
     current_timestamp() AS _silver_processed_at
-FROM workspace.bronze_latam_bank_test.complaints
+FROM IDENTIFIER(:bronze_schema || '.complaints')
 WHERE complaint_id IS NOT NULL
-QUALIFY ROW_NUMBER() OVER (PARTITION BY complaint_id ORDER BY creation_date DESC) = 1;
+-- process_date DESC: si una queja vuelve a llegar con un estado nuevo, gana
+-- la versión más reciente (igual que en las otras tablas transaccionales).
+QUALIFY ROW_NUMBER() OVER (PARTITION BY complaint_id ORDER BY process_date DESC, creation_date DESC) = 1;
 
 -- COMMAND ----------
 -- 5) customers
 -- COMMAND ----------
 
-CREATE OR REPLACE TABLE workspace.silver_latam_bank_test.customers AS
+CREATE OR REPLACE TABLE IDENTIFIER(:silver_schema || '.customers') AS
 SELECT
     customer_id,
     first_name,
@@ -204,7 +205,7 @@ SELECT
     detected_accent,
     _bronze_ingested_at,
     current_timestamp() AS _silver_processed_at
-FROM workspace.bronze_latam_bank_test.customers
+FROM IDENTIFIER(:bronze_schema || '.customers')
 WHERE customer_id IS NOT NULL
 QUALIFY ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY last_updated DESC) = 1;
 
@@ -212,7 +213,7 @@ QUALIFY ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY last_updated DESC) 
 -- 6) daily_exchange_rates
 -- COMMAND ----------
 
-CREATE OR REPLACE TABLE workspace.silver_latam_bank_test.daily_exchange_rates AS
+CREATE OR REPLACE TABLE IDENTIFIER(:silver_schema || '.daily_exchange_rates') AS
 SELECT
     source_currency,
     target_currency,
@@ -223,7 +224,7 @@ SELECT
     source,
     _bronze_ingested_at,
     current_timestamp() AS _silver_processed_at
-FROM workspace.bronze_latam_bank_test.daily_exchange_rates
+FROM IDENTIFIER(:bronze_schema || '.daily_exchange_rates')
 WHERE source_currency IS NOT NULL AND target_currency IS NOT NULL AND date IS NOT NULL
 QUALIFY ROW_NUMBER() OVER (
     PARTITION BY source_currency, target_currency, date
@@ -234,7 +235,7 @@ QUALIFY ROW_NUMBER() OVER (
 -- 7) marketing_campaigns
 -- COMMAND ----------
 
-CREATE OR REPLACE TABLE workspace.silver_latam_bank_test.marketing_campaigns AS
+CREATE OR REPLACE TABLE IDENTIFIER(:silver_schema || '.marketing_campaigns') AS
 SELECT
     campaign_id,
     campaign_name,
@@ -251,7 +252,7 @@ SELECT
     promoted_product,
     _bronze_ingested_at,
     current_timestamp() AS _silver_processed_at
-FROM workspace.bronze_latam_bank_test.marketing_campaigns
+FROM IDENTIFIER(:bronze_schema || '.marketing_campaigns')
 WHERE campaign_id IS NOT NULL
 QUALIFY ROW_NUMBER() OVER (PARTITION BY campaign_id ORDER BY _bronze_ingested_at DESC) = 1;
 
@@ -259,7 +260,7 @@ QUALIFY ROW_NUMBER() OVER (PARTITION BY campaign_id ORDER BY _bronze_ingested_at
 -- 8) products
 -- COMMAND ----------
 
-CREATE OR REPLACE TABLE workspace.silver_latam_bank_test.products AS
+CREATE OR REPLACE TABLE IDENTIFIER(:silver_schema || '.products') AS
 SELECT
     product_id,
     product_number,
@@ -280,7 +281,7 @@ SELECT
     CAST(has_linked_app AS BOOLEAN) AS has_linked_app,
     _bronze_ingested_at,
     current_timestamp() AS _silver_processed_at
-FROM workspace.bronze_latam_bank_test.products
+FROM IDENTIFIER(:bronze_schema || '.products')
 WHERE product_id IS NOT NULL
 QUALIFY ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY last_updated DESC) = 1;
 
@@ -288,7 +289,7 @@ QUALIFY ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY last_updated DESC) =
 -- 9) service_agents
 -- COMMAND ----------
 
-CREATE OR REPLACE TABLE workspace.silver_latam_bank_test.service_agents AS
+CREATE OR REPLACE TABLE IDENTIFIER(:silver_schema || '.service_agents') AS
 SELECT
     agent_id,
     employee_code,
@@ -310,7 +311,7 @@ SELECT
     CAST(CAST(total_monthly_interactions AS DOUBLE) AS INT) AS total_monthly_interactions,
     _bronze_ingested_at,
     current_timestamp() AS _silver_processed_at
-FROM workspace.bronze_latam_bank_test.service_agents
+FROM IDENTIFIER(:bronze_schema || '.service_agents')
 WHERE agent_id IS NOT NULL
 QUALIFY ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY _bronze_ingested_at DESC) = 1;
 
@@ -318,7 +319,7 @@ QUALIFY ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY _bronze_ingested_at DE
 -- 10) transactions
 -- COMMAND ----------
 
-CREATE OR REPLACE TABLE workspace.silver_latam_bank_test.transactions
+CREATE OR REPLACE TABLE IDENTIFIER(:silver_schema || '.transactions')
 PARTITIONED BY (process_date) AS
 SELECT
     transaction_id,
@@ -330,12 +331,15 @@ SELECT
     TRIM(transaction_category) AS transaction_category,
     CAST(amount AS DOUBLE) AS amount,
     currency,
-    CAST(amount_usd AS DOUBLE) AS amount_usd,
+    -- amount_usd viene NULL en todas las transacciones en USD: se completa con amount
+    COALESCE(CAST(amount_usd AS DOUBLE),
+             CASE WHEN currency = 'USD' THEN CAST(amount AS DOUBLE) END) AS amount_usd,
     TRIM(channel) AS channel,
     branch_id,
     merchant_name,
     merchant_category,
-    transaction_country,
+    CASE WHEN TRIM(transaction_country) = 'Mexico' THEN 'México'
+         ELSE transaction_country END AS transaction_country,  -- variante sin tilde (docs/DATA.md)
     transaction_city,
     TRIM(transaction_status) AS transaction_status,
     response_code,
@@ -345,118 +349,12 @@ SELECT
     CAST(longitude AS DOUBLE) AS longitude,
     _bronze_ingested_at,
     current_timestamp() AS _silver_processed_at
-FROM workspace.bronze_latam_bank_test.transactions
+FROM IDENTIFIER(:bronze_schema || '.transactions')
 WHERE transaction_id IS NOT NULL
 QUALIFY ROW_NUMBER() OVER (
     PARTITION BY transaction_id
     ORDER BY process_date DESC, transaction_date DESC
 ) = 1;
 
--- COMMAND ----------
--- Validación rápida: conteos silver vs bronze (deberían ser iguales o
--- levemente menores si hubo duplicados reales que el QUALIFY sacó)
--- COMMAND ----------
-
-SELECT 'branches' AS tabla,
-       (SELECT COUNT(*) FROM workspace.bronze_latam_bank_test.branches) AS bronze,
-       (SELECT COUNT(*) FROM workspace.silver_latam_bank_test.branches) AS silver
-UNION ALL
-SELECT 'call_center_interactions',
-       (SELECT COUNT(*) FROM workspace.bronze_latam_bank_test.call_center_interactions),
-       (SELECT COUNT(*) FROM workspace.silver_latam_bank_test.call_center_interactions)
-UNION ALL
-SELECT 'campaign_sends',
-       (SELECT COUNT(*) FROM workspace.bronze_latam_bank_test.campaign_sends),
-       (SELECT COUNT(*) FROM workspace.silver_latam_bank_test.campaign_sends)
-UNION ALL
-SELECT 'complaints',
-       (SELECT COUNT(*) FROM workspace.bronze_latam_bank_test.complaints),
-       (SELECT COUNT(*) FROM workspace.silver_latam_bank_test.complaints)
-UNION ALL
-SELECT 'customers',
-       (SELECT COUNT(*) FROM workspace.bronze_latam_bank_test.customers),
-       (SELECT COUNT(*) FROM workspace.silver_latam_bank_test.customers)
-UNION ALL
-SELECT 'daily_exchange_rates',
-       (SELECT COUNT(*) FROM workspace.bronze_latam_bank_test.daily_exchange_rates),
-       (SELECT COUNT(*) FROM workspace.silver_latam_bank_test.daily_exchange_rates)
-UNION ALL
-SELECT 'marketing_campaigns',
-       (SELECT COUNT(*) FROM workspace.bronze_latam_bank_test.marketing_campaigns),
-       (SELECT COUNT(*) FROM workspace.silver_latam_bank_test.marketing_campaigns)
-UNION ALL
-SELECT 'products',
-       (SELECT COUNT(*) FROM workspace.bronze_latam_bank_test.products),
-       (SELECT COUNT(*) FROM workspace.silver_latam_bank_test.products)
-UNION ALL
-SELECT 'service_agents',
-       (SELECT COUNT(*) FROM workspace.bronze_latam_bank_test.service_agents),
-       (SELECT COUNT(*) FROM workspace.silver_latam_bank_test.service_agents)
-UNION ALL
-SELECT 'transactions',
-       (SELECT COUNT(*) FROM workspace.bronze_latam_bank_test.transactions),
-       (SELECT COUNT(*) FROM workspace.silver_latam_bank_test.transactions);
-
--- COMMAND ----------
--- GATE DE CALIDAD — a diferencia de los chequeos de arriba (que solo
--- informan), esta celda CORTA la ejecución del notebook si encuentra
--- duplicados reales por clave de negocio en alguna tabla silver. Así,
--- si en el futuro llega un CSV con datos duplicados, el notebook falla
--- en rojo acá mismo en vez de dejar pasar silver corrupto a gold.
---
--- SQL puro (raise_error) para que el notebook entero pueda correr en un
--- SQL warehouse, también como tarea de un Job: si falla, el Job queda
--- marcado como FALLIDO y las tareas de gold que dependen de esta no corren.
--- COMMAND ----------
-
-WITH dq AS (
-    SELECT 'branches' AS tabla, COUNT(*) AS claves_duplicadas
-    FROM (SELECT branch_id FROM workspace.silver_latam_bank_test.branches GROUP BY branch_id HAVING COUNT(*) > 1)
-    UNION ALL
-    SELECT 'call_center_interactions', COUNT(*) FROM (
-        SELECT interaction_id FROM workspace.silver_latam_bank_test.call_center_interactions
-        GROUP BY interaction_id HAVING COUNT(*) > 1)
-    UNION ALL
-    SELECT 'campaign_sends', COUNT(*) FROM (
-        SELECT send_id FROM workspace.silver_latam_bank_test.campaign_sends
-        GROUP BY send_id HAVING COUNT(*) > 1)
-    UNION ALL
-    SELECT 'complaints', COUNT(*) FROM (
-        SELECT complaint_id FROM workspace.silver_latam_bank_test.complaints
-        GROUP BY complaint_id HAVING COUNT(*) > 1)
-    UNION ALL
-    SELECT 'customers', COUNT(*) FROM (
-        SELECT customer_id FROM workspace.silver_latam_bank_test.customers
-        GROUP BY customer_id HAVING COUNT(*) > 1)
-    UNION ALL
-    SELECT 'daily_exchange_rates', COUNT(*) FROM (
-        SELECT source_currency, target_currency, date FROM workspace.silver_latam_bank_test.daily_exchange_rates
-        GROUP BY source_currency, target_currency, date HAVING COUNT(*) > 1)
-    UNION ALL
-    SELECT 'marketing_campaigns', COUNT(*) FROM (
-        SELECT campaign_id FROM workspace.silver_latam_bank_test.marketing_campaigns
-        GROUP BY campaign_id HAVING COUNT(*) > 1)
-    UNION ALL
-    SELECT 'products', COUNT(*) FROM (
-        SELECT product_id FROM workspace.silver_latam_bank_test.products
-        GROUP BY product_id HAVING COUNT(*) > 1)
-    UNION ALL
-    SELECT 'service_agents', COUNT(*) FROM (
-        SELECT agent_id FROM workspace.silver_latam_bank_test.service_agents
-        GROUP BY agent_id HAVING COUNT(*) > 1)
-    UNION ALL
-    SELECT 'transactions', COUNT(*) FROM (
-        SELECT transaction_id FROM workspace.silver_latam_bank_test.transactions
-        GROUP BY transaction_id HAVING COUNT(*) > 1)
-)
-SELECT
-    CASE
-        WHEN SUM(claves_duplicadas) > 0 THEN raise_error(concat(
-            'GATE DE CALIDAD FALLÓ: duplicados reales encontrados en: ',
-            array_join(collect_list(
-                CASE WHEN claves_duplicadas > 0
-                     THEN concat(tabla, ' (', CAST(claves_duplicadas AS STRING), ' claves)') END
-            ), ', ')))
-        ELSE 'Gate de calidad OK: sin duplicados reales en ninguna tabla silver.'
-    END AS resultado
-FROM dq;
+-- Métricas de calidad (duplicados, nulos, cambios de esquema) y gate que
+-- corta la corrida: 02_silver_quality_checks.sql, siguiente tarea del job.
