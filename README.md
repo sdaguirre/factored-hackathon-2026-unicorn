@@ -50,8 +50,8 @@ docker compose up --build        # interfaz en http://localhost:8080
 | Pruebas automáticas del backend | 155 pruebas, sin red | No cubren la calidad conversacional del modelo real |
 | Intención del NLU, conjunto **reservado** (29 frases es/pt) | Reglas 79%. Claude 93–97% (dos corridas) | Una sola persona etiquetó; muestra pequeña |
 | Prueba en vivo con Claude Haiku 4.5 (13 turnos) | 0 caídas a reglas; ~1,1 s por llamada (p95 1,7 s); ~490 tokens de entrada y ~105 de salida por turno | Muestra pequeña, no es un benchmark |
-| Política de crédito preliminar del backend sobre 150.000 clientes (solicitud tipo) | 44,2% elegible, 27,2% datos faltantes, 18,5% revisión humana, 10,1% rechazado | Versión preliminar; se reemplaza por la 0.3 (fila siguiente) |
-| Credit policy 0.3 in gold (Databricks), 150,000 customers | 50,707 eligible (33.8%); 24,953 with a proactive offer; no offer mainly because of missing income (30,033, recoverable in the chat) or a blocked product (25,519). The Python implementation matches gold on all 1.8 M options | Synthetic policy defined by the team; no external ground truth |
+| Política de crédito preliminar del backend sobre 150.000 clientes (solicitud tipo) | 44,2% elegible, 27,2% datos faltantes, 18,5% revisión humana, 10,1% rechazado | Versión preliminar; se reemplaza por la 0.4 (fila siguiente) |
+| Credit policy 0.4 in gold (Databricks), 150,000 customers | 50,707 eligible (33.8%); 24,953 with a proactive offer; no offer mainly because of missing income (30,033, recoverable in the chat) or a blocked product (25,519). The Python implementation matches gold on all 1.8 M options | Synthetic policy defined by the team; no external ground truth |
 | Data pipeline in Databricks (bronze → silver → gold) | Full job in ~14 min; 90 quality metrics per run; 0 key duplicates; update fixture: 5 of 5 cases correct | Static data: updates are shown with a labeled fixture, not real deliveries |
 | Baseline de fraude con `fraud_score` del organizador | PR-AUC 0,577; recall 58% revisando el 1% con mayor riesgo; precisión 5% | Sin `fraud_score`, ningún modelo supera al azar en estos datos |
 
@@ -95,7 +95,7 @@ reconstruir el snapshot derivado del dataset real se necesita acceso al bucket d
   enunciado (resolución automática segura, contención, calidad del escalamiento, resultados inseguros con
   denominadores, latencia y costo por resolución, por idioma). Hoy hay pruebas unitarias y la evaluación del NLU.
 - The backend still evaluates with the preliminary policy (`backend/policy/credit_policy.yaml`). The reference version is
-  0.3 ([`docs/CREDIT_RULES.md`](docs/CREDIT_RULES.md), [`data/reference/`](data/reference/)), already computed in
+  0.4 ([`docs/CREDIT_RULES.md`](docs/CREDIT_RULES.md), [`data/reference/`](data/reference/)), already computed in
   Databricks; aligning the engine is in progress ([`docs/ENGINE_ALIGNMENT.md`](docs/ENGINE_ALIGNMENT.md)).
 - There is no learned risk model: the band comes from `credit_score`. In this data delinquency is unrelated to the score,
   so a model has little signal; it still has to be evaluated against that baseline.

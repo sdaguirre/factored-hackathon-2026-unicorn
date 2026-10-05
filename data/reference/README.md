@@ -42,7 +42,7 @@ amount, score or product age:
 
 Amounts rounded to the nearest 1,000 USD and clamped to the catalog bounds; rates to one decimal.
 
-How the amounts are used (policy 0.3): for credit cards they are the tier's credit limit
+How the amounts are used (policy 0.4): for credit cards they are the tier's credit limit
 range. For loans they are a typical amount range per term, used only to infer the term of a
 customer's existing loans; new loan offers can use any amount in the product range at any
 term up to the band maximum (`ref_policy_bands`).
@@ -54,7 +54,7 @@ Credit card tiers (Classic, Gold, Platinum, Black). **Synthetic.** Derivation in
 (`limit_from_pct`–`limit_to_pct`, a 40/30/20/10 customer pyramid) and the observed rate at
 percentile `rate_pct` (Classic p80 → Black p20, so higher tiers get lower rates).
 
-## Credit policy (policy_version 0.3)
+## Credit policy (policy_version 0.4)
 `ref_policy_params.csv`, `ref_policy_bands.csv` and `ref_segment_adjustments.csv` hold the
 parameters of the credit rules in `docs/CREDIT_RULES.md`. **Synthetic.** The gold SQL and the
 rules service must read the same values.

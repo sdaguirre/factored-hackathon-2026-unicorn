@@ -201,7 +201,7 @@ all options; see `docs/ENGINE_ALIGNMENT.md` for the backend changes.
   deduplicated tables; drop them first if the pipeline still manages them, and drop
   `silver_transactions` once nothing reads it.
 
-## Results as of the 2026-06-30 cutoff (policy 0.3)
+## Results as of the 2026-06-30 cutoff (policy 0.4)
 - 150,000 customers; 50,707 eligible; 24,953 `proactive`, 25,754 `on_customer_interest`.
   A run on the test schemas must give the same numbers.
 - Main reasons for no offer: missing income 30,033 (recoverable by asking the customer),

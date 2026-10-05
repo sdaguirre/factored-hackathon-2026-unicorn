@@ -21,6 +21,7 @@ WITH params AS (
         max(CASE WHEN param_name = 'max_days_past_due'   THEN CAST(param_value AS INT)    END) AS max_days_past_due,
         max(CASE WHEN param_name = 'min_income_usd'      THEN CAST(param_value AS DOUBLE) END) AS min_income_usd,
         max(CASE WHEN param_name = 'fraud_lookback_days' THEN CAST(param_value AS INT)    END) AS fraud_lookback_days,
+        max(CASE WHEN param_name = 'max_age_at_maturity_years' THEN CAST(param_value AS INT) END) AS max_age_at_maturity_years,
         -- job parameter overrides the policy cutoff; empty = policy cutoff
         coalesce(try_cast(nullif(:as_of_date, '') AS DATE),
                  max(CASE WHEN param_name = 'as_of_date' THEN CAST(param_value AS DATE) END)) AS as_of_date,
@@ -50,6 +51,7 @@ customers AS (
         credit_score,
         estimated_monthly_income                                      AS declared_income_local,
         registration_date,
+        date_of_birth,                                                -- only for the age-at-maturity term cap
         coalesce(accepts_marketing, false)                            AS accepts_marketing
     FROM IDENTIFIER(:silver_schema || '.customers')
 ),
@@ -200,8 +202,13 @@ base AS (
         bd.band                                                      AS risk_band,
         coalesce(bd.offer_allowed, false)                            AS band_offer_allowed,
         coalesce(bd.band_rate_adjustment_pp, 0)                      AS band_rate_adjustment_pp,
-        coalesce(bd.max_term_personal_loan_months, 0)                AS max_term_personal_loan_months,
-        coalesce(bd.max_term_mortgage_months, 0)                     AS max_term_mortgage_months,
+        -- band maximum term, capped so the loan ends before max_age_at_maturity_years (no cap when the
+        -- birth date is missing: the advisor verifies age)
+        least(coalesce(bd.max_term_personal_loan_months, 0),
+              coalesce(age.max_term_by_age_months, coalesce(bd.max_term_personal_loan_months, 0))) AS max_term_personal_loan_months,
+        least(coalesce(bd.max_term_mortgage_months, 0),
+              coalesce(age.max_term_by_age_months, coalesce(bd.max_term_mortgage_months, 0)))      AS max_term_mortgage_months,
+        age.max_term_by_age_months,
         coalesce(sa.rate_adjustment_pp, 0)                           AS segment_rate_adjustment_pp
     FROM customers c
     CROSS JOIN params p
@@ -212,6 +219,10 @@ base AS (
     LEFT JOIN fraud f USING (customer_id)
     LEFT JOIN complaints cm USING (customer_id)
     LEFT JOIN banded bd USING (customer_id)
+    LEFT JOIN (SELECT c2.customer_id,
+                      greatest(p2.max_age_at_maturity_years * 12
+                               - CAST(floor(months_between(p2.as_of_date, c2.date_of_birth)) AS INT), 0) AS max_term_by_age_months
+               FROM customers c2 CROSS JOIN params p2) age USING (customer_id)
     LEFT JOIN IDENTIFIER(:silver_schema || '.ref_segment_adjustments') sa ON sa.segment = c.segment
 ),
 capacity AS (
@@ -266,6 +277,7 @@ SELECT
     segment_rate_adjustment_pp,
     max_term_personal_loan_months,
     max_term_mortgage_months,
+    max_term_by_age_months,
     band_rate_adjustment_pp + segment_rate_adjustment_pp                   AS total_rate_adjustment_pp,
     -- hard filters (docs/CREDIT_RULES.md section 1)
     filter(array(
@@ -346,8 +358,9 @@ ALTER TABLE IDENTIFIER(:gold_schema || '.customer_credit_profile') ALTER COLUMN
     open_critical_complaints COMMENT 'Open complaints with priority Critical; remove the proactive offer',
     band_rate_adjustment_pp COMMENT 'Rate adjustment of the risk band, percentage points',
     segment_rate_adjustment_pp COMMENT 'Rate adjustment of the segment, percentage points',
-    max_term_personal_loan_months COMMENT 'Longest personal loan term allowed for the risk band',
-    max_term_mortgage_months COMMENT 'Longest mortgage term allowed for the risk band',
+    max_term_personal_loan_months COMMENT 'Longest personal loan term allowed: band maximum, capped by max_term_by_age_months',
+    max_term_mortgage_months COMMENT 'Longest mortgage term allowed: band maximum, capped by max_term_by_age_months',
+    max_term_by_age_months COMMENT 'Months until the customer reaches the policy max_age_at_maturity_years; null when the birth date is missing (no cap). Rule input only, never a risk feature',
     total_rate_adjustment_pp COMMENT 'Band + segment adjustment added to the ref_term_grid reference rate, percentage points',
     reason_codes COMMENT 'Hard filters that failed (R01-R08); empty when eligible',
     is_eligible COMMENT 'True when no hard filter fails and there is capacity',
@@ -382,8 +395,8 @@ CREATE OR REPLACE VIEW IDENTIFIER(:gold_schema || '.customer_credit_offer_contex
     max_total_installment_usd COMMENT 'max_debt_to_income x income_used_usd, USD',
     available_installment_usd COMMENT 'max_total_installment_usd - current_installments_usd, USD: the most a new monthly installment can be; R08 when <= 0',
     total_rate_adjustment_pp COMMENT 'Band + segment adjustment added to the ref_term_grid reference rate, percentage points',
-    max_term_personal_loan_months COMMENT 'Longest personal loan term allowed for the risk band',
-    max_term_mortgage_months COMMENT 'Longest mortgage term allowed for the risk band',
+    max_term_personal_loan_months COMMENT 'Longest personal loan term allowed: band maximum, capped by max_term_by_age_months',
+    max_term_mortgage_months COMMENT 'Longest mortgage term allowed: band maximum, capped by max_term_by_age_months',
     open_complaints COMMENT 'Complaints with status Open, In Process or Escalated; flag F04 on accepted offers',
     open_priority_complaints COMMENT 'Open complaints with priority High or Critical; set requires_advisor_review',
     open_critical_complaints COMMENT 'Open complaints with priority Critical; remove the proactive offer',

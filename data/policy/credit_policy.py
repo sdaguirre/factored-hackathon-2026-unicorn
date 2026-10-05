@@ -1,4 +1,4 @@
-"""Reference implementation of the credit policy 0.3 (docs/CREDIT_RULES.md) in plain Python.
+"""Reference implementation of the credit policy 0.4 (docs/CREDIT_RULES.md) in plain Python.
 
 It mirrors the gold SQL (data/databricks/gold/10 and 20) so the backend rules service can
 compute and recompute offers with the same parameters and formulas. Parameters come from

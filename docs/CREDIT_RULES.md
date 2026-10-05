@@ -1,6 +1,6 @@
-# Credit rules (synthetic, policy version 0.3)
+# Credit rules (synthetic, policy version 0.4)
 
-> Policy 0.3 is the reference version of the credit rules. Earlier components
+> Policy 0.4 is the reference version of the credit rules. Earlier components
 > (`backend/policy/credit_policy.yaml`, gold views) were built on preliminary versions so the
 > team could move in parallel; they are aligned to this version in follow-up PRs.
 
@@ -74,6 +74,19 @@ it comes from `credit_score` (`ref_policy_bands`):
 Risk limits the term, not the amount: a riskier band gets a higher rate and shorter maximum
 terms. Credit cards always have the 5-year card term.
 
+**Age at maturity (new in 0.4).** A personal loan or mortgage must end before the customer turns
+`max_age_at_maturity_years` = 75 (`ref_policy_params`), as banks usually require for life
+insurance on the loan. The maximum term is the band maximum capped by the months left until
+that age (`customer_credit_profile.max_term_by_age_months`); a term above it is unavailable
+(`term_above_band_maximum`). Examples: at 58, mortgages up to 15 years and personal loans up to
+the band maximum; at 72, personal loans up to 36 months and no mortgage. Cards have no age cap.
+When the birth date is missing there is no cap and the advisor verifies age.
+
+Age is used **only** for this explicit term rule, never as a risk-model feature or to change the
+amount or rate; gender, marital status and accent are not used at all (they serve only to
+measure bias). At the 2026-06-30 cutoff, 19,256 of the 50,707 eligible customers have no
+mortgage term available because of age and 8,677 no personal loan term; their card offer stands.
+
 Segment adjustment (`ref_segment_adjustments`): Premium −1.0 pp, Plus −0.5 pp, Basic 0,
 Student +1.0 pp.
 
@@ -116,7 +129,7 @@ The rules service starts from `gold.customer_credit_profile` and recomputes with
 | What the customer says | Treatment |
 |---|---|
 | Their income is different | Replaces income used; offer conditional, flag `F03` |
-| Additional household income | Added to income used; conditional, flag `F03`, document required |
+| Additional household income | Asked to **every** customer the same way ("is there anyone else in your household who contributes income and could join the credit?"), never inferred from marital status. If yes, the agent also asks **that person's monthly installments**: the income is added to income used and the installments to current installments (household income comes with household debt). If the customer does not know those installments, the extra income is not added and the advisor completes it. Conditional, flag `F03`; documents of both people required |
 | Wants a lower installment or longer term | Pick another amount or option within the available installment |
 | Has a debt outside the bank | Its installment is added to current installments; the offer may drop |
 | Paid off a loan at another bank | Only changes if that installment had been declared before |

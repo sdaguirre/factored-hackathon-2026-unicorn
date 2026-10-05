@@ -96,7 +96,7 @@ def test_accepted_offer_row_and_f02_only_on_declared_income():
     row = build_credit_offer(offer_id="o-1", profile=profile(), option=pl24, amount_usd=8200, policy=POLICY,
                              flags=[], offer_origin="proactive", created_at=created)
     assert row["debt_to_income_after"] == pytest.approx(0.1993, abs=1e-4) and row["flags"] == []
-    assert row["policy_version"] == "0.3" and str(row["valid_until"]) == "2026-07-30"
+    assert row["policy_version"] == "0.4" and str(row["valid_until"]) == "2026-07-30"
 
     r = recalculate(profile(), POLICY, additional_income_usd=1000.0)
     pl24 = option(r.options, "PL", 24)

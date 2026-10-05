@@ -54,7 +54,7 @@ checks AS (
     CROSS JOIN (SELECT max(param_value) AS v FROM IDENTIFIER(:silver_schema || '.ref_policy_params')
                 WHERE param_name = 'policy_version') r
 
-    -- 4. Eligible share inside the expected range (33.8% at the 2026-06-30 cutoff with policy 0.3).
+    -- 4. Eligible share inside the expected range (33.8% at the 2026-06-30 cutoff with policy 0.4).
     --    A share outside 20%-50% usually means a broken join, cast or parameter, not a real change.
     UNION ALL
     SELECT 'customer_credit_profile', 'eligible_share',

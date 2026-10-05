@@ -9,7 +9,7 @@ Datos y política sintéticos (prototipo).
 |---|---|---|
 | Entender el mensaje, detectar idioma, sentimiento y tema delicado | LLM, salida JSON validada | Es lenguaje, no decisión |
 | Redactar saludos, cierres y preguntas de aclaración | LLM, **solo mensajes de bajo riesgo** | Las decisiones y ofertas salen de plantillas revisadas |
-| Elegibilidad, monto máximo y tasa | Motor determinista (`backend/app/policy/credit_engine.py`); reference rules: policy 0.3 ([`CREDIT_RULES.md`](CREDIT_RULES.md)), computed in gold and implemented in `data/policy/` | El modelo no puede aprobar ni inventar reglas |
+| Elegibilidad, monto máximo y tasa | Motor determinista (`backend/app/policy/credit_engine.py`); reference rules: policy 0.4 ([`CREDIT_RULES.md`](CREDIT_RULES.md)), computed in gold and implemented in `data/policy/` | El modelo no puede aprobar ni inventar reglas |
 | Datos y permisos del cliente | Herramientas (`backend/app/agent/tools.py`), con el `customer_id` de la sesión autenticada | Ninguna herramienta recibe un `customer_id` del modelo |
 | Derivar a un humano | Código: solo si el cliente lo pidió de forma explícita o confirmó una oferta de derivación | Una derivación es una acción |
 | Cuándo ofrecer crédito sin que lo pidan | Código (`backend/app/agent/proactive.py`) | Es una decisión comercial y de consentimiento |
@@ -82,7 +82,7 @@ S3 (organizer CSVs) → landing → bronze (all STRING, _rescued_data, lineage)
 ```
 
 - **Credit policy as data:** the silver `ref_*` tables (catalog, rate and term grid, bands, segments, parameters) come from
-  [`data/reference/`](../data/reference/) and are version 0.3 of the rules ([`CREDIT_RULES.md`](CREDIT_RULES.md)). Gold
+  [`data/reference/`](../data/reference/) and are version 0.4 of the rules ([`CREDIT_RULES.md`](CREDIT_RULES.md)). Gold
   uses them to compute eligibility and offers for the 150,000 customers.
 - **Jobs:** `latam_bank_medallion` (bronze → gold, ~14 min, daily at 06:00 but paused because the data is static),
   `credit_policy_refresh` (recomputes offers when the policy changes, ~1 min), `credit_gold_deploy` and
