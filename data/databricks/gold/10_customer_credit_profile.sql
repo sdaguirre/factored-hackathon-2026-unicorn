@@ -1,11 +1,17 @@
 -- =============================================================================================
 -- customer_credit_profile: one row per customer with the indicators the agent reads.
--- Daily task of the credit_gold_daily job. Parameter :as_of_date (YYYY-MM-DD); empty means the
--- policy cutoff in silver ref_policy_params (2026-06-30 for the static hackathon dataset).
+-- Task of the latam_bank_medallion and credit_policy_refresh jobs. Parameter :as_of_date
+-- (YYYY-MM-DD); empty means the policy cutoff in silver ref_policy_params (2026-06-30 for the
+-- static hackathon dataset).
+-- Parameters :silver_schema and :gold_schema (catalog.schema) select every table and function
+-- (silver data and ref_*, gold fn_*), so the same file runs against the _test or the real schemas.
+-- Reads the typed, deduplicated silver built by 02_silver.sql (one current row per key).
 -- Policy and formulas: docs/CREDIT_RULES.md. Synthetic policy, offline results.
 -- =============================================================================================
 
-CREATE OR REPLACE TABLE workspace.gold_latam_bank.customer_credit_profile
+CREATE SCHEMA IF NOT EXISTS IDENTIFIER(:gold_schema);
+
+CREATE OR REPLACE TABLE IDENTIFIER(:gold_schema || '.customer_credit_profile')
 COMMENT 'One row per customer with the indicators the credit assistant reads: income, current installments, 20% debt capacity, risk band, rate adjustment, hard-filter reason codes and eligibility. As of the policy cutoff date. Amounts in USD; local currency via fx_to_usd. Synthetic policy (silver ref_*), offline results.'
 AS
 WITH params AS (
@@ -19,18 +25,17 @@ WITH params AS (
         coalesce(try_cast(nullif(:as_of_date, '') AS DATE),
                  max(CASE WHEN param_name = 'as_of_date' THEN CAST(param_value AS DATE) END)) AS as_of_date,
         max(CASE WHEN param_name = 'policy_version'      THEN param_value                 END) AS policy_version
-    FROM workspace.silver_latam_bank.ref_policy_params
+    FROM IDENTIFIER(:silver_schema || '.ref_policy_params')
 ),
 -- latest rate on or before the cutoff (the rate table ends 2026-06-17)
 fx AS (
     SELECT r.source_currency AS currency,
-           max_by(CAST(r.exchange_rate AS DOUBLE), r.date) AS to_usd,
-           CAST(max(r.date) AS DATE)                       AS fx_date
-    FROM workspace.silver_latam_bank.daily_exchange_rates r
+           max_by(r.exchange_rate, r.date) AS to_usd,
+           max(r.date)                     AS fx_date
+    FROM IDENTIFIER(:silver_schema || '.daily_exchange_rates') r
     CROSS JOIN params p
-    WHERE r.__END_AT IS NULL
-      AND r.target_currency = 'USD'
-      AND CAST(r.date AS DATE) <= p.as_of_date
+    WHERE r.target_currency = 'USD'
+      AND r.date <= p.as_of_date
     GROUP BY r.source_currency
     UNION ALL
     SELECT 'USD', 1.0, CAST(NULL AS DATE)
@@ -42,16 +47,15 @@ customers AS (
         CASE country WHEN 'México' THEN 'MXN' WHEN 'Colombia' THEN 'COP' WHEN 'Argentina' THEN 'ARS' END AS local_currency,
         segment,
         customer_status,
-        CAST(try_cast(credit_score AS DOUBLE) AS INT)                 AS credit_score,
-        try_cast(estimated_monthly_income AS DOUBLE)                  AS declared_income_local,
-        CAST(try_cast(registration_date AS TIMESTAMP) AS DATE)        AS registration_date,
-        lower(accepts_marketing) = 'true'                             AS accepts_marketing
-    FROM workspace.silver_latam_bank.customers
-    WHERE __END_AT IS NULL
+        credit_score,
+        estimated_monthly_income                                      AS declared_income_local,
+        registration_date,
+        coalesce(accepts_marketing, false)                            AS accepts_marketing
+    FROM IDENTIFIER(:silver_schema || '.customers')
 ),
 catalog AS (
     SELECT product_code, source_product_type, max_amount_usd, min_rate_pct, max_rate_pct
-    FROM workspace.silver_latam_bank.ref_product_catalog
+    FROM IDENTIFIER(:silver_schema || '.ref_product_catalog')
 ),
 products AS (
     SELECT
@@ -59,15 +63,14 @@ products AS (
         p.customer_id,
         p.product_status,
         c.product_code,                                         -- CC / PL / MG; null = not a credit product
-        CAST(try_cast(p.opening_date AS TIMESTAMP) AS DATE)     AS opening_date,
-        try_cast(p.interest_rate AS DOUBLE)                     AS interest_rate,
-        try_cast(p.days_past_due AS DOUBLE)                     AS days_past_due,
-        try_cast(p.credit_limit AS DOUBLE) * fx.to_usd          AS credit_limit_usd,
-        try_cast(p.current_balance AS DOUBLE) * fx.to_usd       AS current_balance_usd
-    FROM workspace.silver_latam_bank.products p
+        p.opening_date,
+        p.interest_rate,
+        p.days_past_due,
+        p.credit_limit * fx.to_usd                              AS credit_limit_usd,
+        p.current_balance * fx.to_usd                           AS current_balance_usd
+    FROM IDENTIFIER(:silver_schema || '.products') p
     LEFT JOIN catalog c ON c.source_product_type = p.product_type
     LEFT JOIN fx ON fx.currency = p.currency
-    WHERE p.__END_AT IS NULL
 ),
 -- Existing loans have no term in the data: take it from ref_term_grid, using the shortest term
 -- whose amount range covers the original amount (credit_limit), clamped to the catalog maximum.
@@ -75,7 +78,7 @@ existing_loans AS (
     SELECT
         l.customer_id,
         l.product_code,
-        workspace.gold_latam_bank.fn_monthly_installment(
+        IDENTIFIER(:gold_schema || '.fn_monthly_installment')(
             l.principal_usd, coalesce(l.interest_rate, g.reference_rate_pct), g.term_months) AS installment_usd
     FROM (
         SELECT pr.*, coalesce(pr.credit_limit_usd, pr.current_balance_usd) AS principal_usd, c.max_amount_usd AS catalog_max_usd
@@ -83,7 +86,7 @@ existing_loans AS (
         JOIN catalog c USING (product_code)
         WHERE pr.product_status = 'Active' AND pr.product_code IN ('PL', 'MG')
     ) l
-    JOIN workspace.silver_latam_bank.ref_term_grid g
+    JOIN IDENTIFIER(:silver_schema || '.ref_term_grid') g
       ON g.product_code = l.product_code
      AND least(l.principal_usd, l.catalog_max_usd) <= g.max_amount_usd
     QUALIFY row_number() OVER (PARTITION BY l.product_id ORDER BY g.term_months) = 1
@@ -93,7 +96,7 @@ existing_cards AS (
     SELECT
         pr.customer_id,
         pr.product_code,
-        workspace.gold_latam_bank.fn_monthly_installment(
+        IDENTIFIER(:gold_schema || '.fn_monthly_installment')(
             greatest(coalesce(pr.current_balance_usd, 0), 0),
             coalesce(pr.interest_rate, (c.min_rate_pct + c.max_rate_pct) / 2),
             60) AS installment_usd
@@ -126,8 +129,8 @@ product_risk AS (
 transactions AS (
     SELECT
         t.customer_id, t.transaction_type, t.transaction_status, t.process_date, t.is_fraud,
-        coalesce(t.amount_usd, CASE WHEN t.currency = 'USD' THEN t.amount END, t.amount * fx.to_usd) AS amount_usd
-    FROM workspace.silver_latam_bank.silver_transactions t
+        coalesce(t.amount_usd, t.amount * fx.to_usd) AS amount_usd   -- silver already fills USD rows
+    FROM IDENTIFIER(:silver_schema || '.transactions') t
     LEFT JOIN fx ON fx.currency = t.currency
 ),
 -- Observed deposits are sparse in the data (median under 2 per year): informational only.
@@ -155,14 +158,14 @@ complaints AS (
         count_if(status IN ('Open', 'In Process', 'Escalated'))                                  AS open_complaints,
         count_if(status IN ('Open', 'In Process', 'Escalated') AND priority IN ('High', 'Critical')) AS open_priority_complaints,
         count_if(status IN ('Open', 'In Process', 'Escalated') AND priority = 'Critical')            AS open_critical_complaints
-    FROM workspace.bronze_latam_bank.complaints
+    FROM IDENTIFIER(:silver_schema || '.complaints')   -- deduplicated in silver
     GROUP BY customer_id
 ),
 banded AS (
     SELECT c.customer_id, b.band, b.offer_allowed, b.rate_adjustment_pp AS band_rate_adjustment_pp,
            b.max_term_personal_loan_months, b.max_term_mortgage_months
     FROM customers c
-    JOIN workspace.silver_latam_bank.ref_policy_bands b ON c.credit_score >= b.min_credit_score
+    JOIN IDENTIFIER(:silver_schema || '.ref_policy_bands') b ON c.credit_score >= b.min_credit_score
     QUALIFY row_number() OVER (PARTITION BY c.customer_id ORDER BY b.min_credit_score DESC) = 1
 ),
 base AS (
@@ -209,7 +212,7 @@ base AS (
     LEFT JOIN fraud f USING (customer_id)
     LEFT JOIN complaints cm USING (customer_id)
     LEFT JOIN banded bd USING (customer_id)
-    LEFT JOIN workspace.silver_latam_bank.ref_segment_adjustments sa ON sa.segment = c.segment
+    LEFT JOIN IDENTIFIER(:silver_schema || '.ref_segment_adjustments') sa ON sa.segment = c.segment
 ),
 capacity AS (
     SELECT
