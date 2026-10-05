@@ -59,6 +59,31 @@ python -m jupyter nbconvert --to notebook --execute --inplace analysis/notebooks
 python backend/scripts/build_snapshot.py --customers 400                                                   # snapshot del backend
 ```
 
+## Databricks medallion and credit layers
+
+The data and the credit flow are also built in Databricks (Unity Catalog, `workspace` catalog)
+by the `latam_bank_medallion` job: bronze → silver → gold, with quality metrics on every run.
+Run order, objects, quality checks and results are in `data/databricks/README.md`; policy and
+formulas in `docs/CREDIT_RULES.md` (policy 0.3, the reference version of the credit rules).
+Every file takes the schemas as parameters, so the same code runs against the `_test` schemas.
+
+| Layer | Objects | Notes |
+|---|---|---|
+| bronze `bronze_latam_bank` | The 10 landing entities (`customers`, `products`, `transactions`, `complaints`, `call_center_interactions`, ...) | Loaded as delivered from the daily CSVs (`01_bronze.py`): all STRING, `_rescued_data` for schema changes; `complaints` and `call_center_interactions` verified against the source files (rows per file, nulls per column, numeric sums, text length) |
+| silver `silver_latam_bank` | The same 10 tables, typed and deduplicated; `ref_product_catalog`, `ref_term_grid`, `ref_policy_params`, `ref_policy_bands`, `ref_segment_adjustments` | `02_silver.sql`: real types, one row per business key; synthetic reference tables from `data/reference/` (catalog, pricing, policy) stand in for source data the dataset lacks |
+| gold `gold_latam_bank` | `customer_credit_profile`, `customer_credit_offer_options`, `credit_offers`, `customer_products_summary`, `customer_complaints_summary`, `customer_cashflow_summary`, `pipeline_quality_metrics`, `fn_monthly_installment`, `fn_max_principal` | Indicators and baseline offers for all 150,000 customers as of 2026-06-30; `credit_offers` stores offers accepted in the chat; `pipeline_quality_metrics` keeps the quality metrics of every run |
+
+Findings from building these layers that complement the table above:
+- Observed deposits are sparse (median under 2 per year per customer) and a median 20% of
+  declared income, so the credit rules use declared income for the 20% limit.
+- `amount_usd` is null for every USD transaction; silver fills it with `amount` for USD.
+- `transaction_country` has "Mexico" without the accent in 40,515 rows; silver normalizes it to "México".
+- Loans have no `expiration_date`; existing loan installments use the synthetic term grid.
+- In bronze every column is a string and `credit_score` comes as `'805.0'`, so `CAST(... AS INT)`
+  fails; silver casts to `DOUBLE` first.
+- No key or content duplicates in the files (only 6 repeated `product_number` values across
+  different products), against the "~2%" of the dataset documentation.
+
 ## Controles de calidad que existen hoy
 
 Ejecutados en los notebooks (`analysis/notebooks/`): unicidad de claves primarias, integridad de claves foráneas, rangos

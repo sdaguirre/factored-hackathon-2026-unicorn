@@ -30,3 +30,9 @@ venv/
 Thumbs.db
 .vscode/
 .idea/
+
+# ---------------------------------------------------------------- tablas de referencia sinteticas del equipo (si se publican)
+!data/reference/*.csv
+
+# ---------------------------------------------------------------- databricks asset bundles (estado local de despliegue)
+.databricks/
