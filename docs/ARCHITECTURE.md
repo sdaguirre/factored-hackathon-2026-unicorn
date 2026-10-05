@@ -50,17 +50,24 @@ medida y límites en `backend/README.md`.
 
 Al cerrar la conversación se ofrece un préstamo personal indicativo **solo si** el cliente acepta marketing, está
 preaprobado con datos del banco (no con ingreso declarado en el chat), no hubo sentimiento negativo ni tema delicado, no
-se le rechazó una solicitud, no se ofreció ya y **no le queda nada pendiente** (ni un tema de soporte en la sesión, ni un
-caso crítico abierto, ni uno abierto en los últimos 180 días). Quien pide un crédito se evalúa **sin** mirar el
+se le rechazó una solicitud, no se ofreció ya y no se atendió un tema ajeno al crédito en la sesión. Las quejas solo cuentan a través de gold:
+`offer_mode = proactive` ya excluye a quien tiene una queja crítica abierta. Quien pide un crédito se evalúa **sin** mirar el
 consentimiento de marketing: ese consentimiento solo gobierna lo proactivo.
 
-## Soporte y contexto del cliente
+## Scope and data the assistant uses
 
-El agente atiende primero lo que el cliente trae. Al autenticar lee, una vez, sus casos abiertos y la existencia de sus
-productos (lista blanca de campos: nunca saldos, movimientos ni montos). Responde con datos verificados (que un producto
-existe, categoría, fecha y estado de un caso), anota lo que el cliente cuenta como declarado y ofrece conectar con un
-asesor; no deriva solo. El resumen para el asesor lleva ese contexto, el ánimo, una prioridad y una ruta sugeridas.
-Detalle y límites en `backend/README.md`.
+The chat handles **credit offers only** (personal loan, credit card, mortgage): showing the pre-approved offers,
+simulating amounts and terms, recalculating with what the customer declares and handing the lead to an advisor.
+Anything else (balances, products, the status of a complaint, the app, other banking topics) is **handed off to an
+advisor after the customer confirms**, without showing bank data; incidents (fraud, an unrecognized charge) get one
+line of empathy first. What the customer says is kept as declared, unverified notes for the advisor.
+
+The assistant's only data source is **gold** (`customer_credit_profile` and the policy tables, through the export):
+offers, eligibility and reason codes, the proactive decision (`offer_mode`), complaint counts (which already drive
+`offer_mode` and flag F04), credit product counts for the advisor summary, and the exchange rate (`fx_to_usd`,
+`fx_date`). It does not read raw cases, products, transactions or FX files. The identity check (security questions,
+masked e-mail, documents on file) uses the customer master: that is authentication, not assistant knowledge.
+Offers and the final summary carry a `disclaimer` field (`simulation` / `final`) that the UI draws as its own panel.
 
 ## Idioma
 

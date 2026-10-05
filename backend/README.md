@@ -131,7 +131,7 @@ falla o devuelve algo inválido, el turno cae al extractor por reglas.
   se acepta si el cliente la pidió de forma explícita**; un incidente (cargo no reconocido, fraude) pide confirmación.
 - Solo reescribe mensajes de bajo riesgo (saludo, cierre, preguntas de monto o ingreso, aceptación o rechazo de una
   oferta, y en soporte: tema ajeno, incidente, detalle anotado). Las decisiones de crédito, las ofertas, las derivaciones,
-  los avisos de simulación y **todo mensaje con hechos del banco** (productos, casos abiertos) salen **siempre de la
+  los avisos de simulación y **todo mensaje con hechos del banco** salen **siempre de la
   plantilla revisada**: el guardia de números no detecta frases nuevas que cambien el compromiso. Se ajusta con
   `CHAT_LLM_REWRITE_KINDS` (lista por comas; `none` = el modelo nunca reescribe).
 - Su texto se descarta si trae números que no están en los hechos calculados, si **promete** algo (resultado, plazo,
@@ -226,37 +226,36 @@ Se ofrece solo si se cumplen **todas**: gold lo marca como `offer_mode = proacti
 marketing y sin reclamo crítico abierto) y tiene una opción disponible, que se presenta empezando por lo más alto
 (préstamo personal; si no, tarjeta; si no, hipoteca); no hubo sentimiento negativo ni tema delicado (fraude, disputa, reclamo, tarjeta robada, cargo no reconocido) en
 la sesión; no se le rechazó una solicitud en la sesión; y no se ofreció ya ni dijo que no. Además **no le queda nada
-pendiente**: ni un tema de soporte en esta conversación, ni una derivación, ni un caso **crítico** abierto, ni un caso
-abierto en los últimos 180 días. Si acepta, entra al flujo normal de elegibilidad; si rechaza, no se repite. La oferta
+pendiente**: ni un tema ajeno al crédito en esta conversación ni una derivación. Las quejas solo cuentan a través de gold (`offer_mode`). Si acepta, entra al flujo normal de elegibilidad; si rechaza, no se repite. La oferta
 queda en `actions_taken` y `verified_facts` del resumen de derivación para que el agente la vea.
 
-## Soporte, contexto y resumen para el asesor
+## Scope, customer context and the advisor summary
 
-Antes de hablar de crédito, el agente atiende lo que el cliente trae. Reglas: **solo confirma que un producto existe y
-deriva el detalle**; nunca muestra saldos, movimientos, montos ni resoluciones.
+The chat handles **credit offers only**. Anything else is handed off to an advisor **after a "yes"**, without showing
+any bank data: `account_inquiry` (balances, movements, which products), `case_status` (a complaint already open) and
+other banking topics answer "that topic is handled by an advisor… shall I connect you?" (`non_credit` template).
+Incidents (fraud, unrecognized charge, stolen card) keep one line of empathy and the same confirmation.
 
-- **Contexto al autenticar** (`app/agent/context.py`, `sessions.verify`): casos abiertos del cliente (reclamos abiertos de
-  cualquier edad e interacciones sin resolver en 90 días; tabla gold `customer_case_context`, en el snapshot
-  `case_context.parquet`) y existencia de productos. El repositorio solo entrega una lista blanca de campos.
-- **Bienvenida**: si hay un caso abierto de **≤ 180 días**, abre con él ("Veo un reclamo sobre… ¿quiere que le cuente?");
-  los más antiguos no se mencionan (en los datos hay reclamos "abiertos" desde hace años) pero sí van al asesor.
-- **Intenciones de soporte**: `account_inquiry` (¿tengo una tarjeta?, mi saldo → confirma tipo y terminación y ofrece
-  derivar), `case_status` (categoría, fecha y estado del caso; el avance lo informa un asesor), incidentes (fraude,
-  cargo no reconocido: se reconoce, se pide lo básico y se ofrece conectar) y otros temas (se anota y se ofrece conectar).
-  Ninguno deriva solo: la derivación sigue exigiendo un "sí".
-- **Notas del cliente**: lo que cuenta mientras decide queda anotado como *declarado, sin verificar*. Números largos
-  (tarjetas, cuentas, documentos) y correos se omiten en las notas y en los últimos mensajes del resumen.
-- **Empatía**: si el cliente se muestra molesto, la respuesta abre reconociéndolo (no más de una vez cada 3 turnos).
-- **Resumen v2** (`GET /v1/sessions/{id}/handoff`, `GET /v1/handoffs`): además de lo anterior trae `topic`, `case_notes`,
-  `customer_context` (casos abiertos priorizados, conteos, banderas, productos), `sentiment` (curva y frustración),
-  `priority` (`normal|high|urgent`), `suggested_route`, `suggested_next_actions` y `narrative` (párrafo para leer de un
-  vistazo). La narrativa la escribe el código; si hay LLM, la suya la reemplaza solo si no agrega datos ajenos al
-  resumen ni promesas (`narrative_source`: `rules` o `llm`). Con el modelo real, esta ruta **no está probada**.
+- **Customer context** (`app/agent/context.py`, built at `sessions.verify`): **only the gold profile row**. Complaint
+  counts (open, High/Critical, Critical), credit product counts, `offer_mode`, `requires_advisor_review` and reason
+  codes. No raw cases, products, transactions or FX files are read by the assistant (`tests/test_credit_scope.py`
+  fails if the chat touches them).
+- **Welcome**: always about credit ("I can show your pre-approved credit offers… for anything else I connect you with
+  an advisor"), with the quick replies "Ver mis ofertas de crédito" and "Hablar con un asesor".
+- **Customer notes**: what the customer tells while deciding is kept as *declared, unverified*. Long numbers (cards,
+  accounts, documents) and e-mails are removed from the notes and from the last messages of the summary.
+- **Empathy**: a negative message opens with an acknowledgement (at most once every 3 turns).
+- **Summary** (`GET /v1/sessions/{id}/handoff`, `GET /v1/handoffs`): `topic`, `case_notes`, `customer_context` (gold
+  counts, `source: gold.customer_credit_profile`), `sentiment`, `priority` (`normal|high|urgent`), `suggested_route`,
+  `suggested_next_actions`, the accepted offer with its flags, and `narrative` (written by code; an LLM version replaces
+  it only if it adds no data foreign to the summary).
+- **Simulation notice**: replies that present an offer carry `disclaimer: "simulation"` and the final offer summary
+  `disclaimer: "final"`; the UI draws it as a panel above the offer and below the summary. The reply text does not
+  repeat it.
 
-Límites: el tope de una oferta por sesión no se persiste entre sesiones (hace falta guardar la última oferta por
-cliente); la oferta indica la capacidad máxima de la política (20% de endeudamiento), lo cual es agresivo para una
-propuesta comercial: conviene que el equipo decida un tope menor; y el sentimiento y el tema delicado los detecta
-un léxico simple en modo `mock`, no un modelo.
+Limits: the one-offer-per-session cap is not persisted across sessions; the offer shows the policy's maximum capacity
+(20% debt-to-income); and in `mock` mode sentiment and sensitive topics come from a simple lexicon, not a model.
+
 
 ## Moneda, solicitud, resumen y tono
 
@@ -290,7 +289,9 @@ un léxico simple en modo `mock`, no un modelo.
 
 ## Datos
 
-Hay dos orígenes, con la misma forma (clientes, productos, sucursales, movimientos recientes, perfil crediticio y `accepts_marketing`):
+Hay dos orígenes, con la misma forma. The assistant reads only the gold credit profile (`credit_profile.parquet`, with
+`fx_to_usd`/`fx_date` for currency conversion); customers, products and branches are used only by the identity check.
+The `transactions`, `fx_rates` and `case_context` files are no longer read.
 
 - `data/fixture/`: **conjunto de ejemplo inventado por el equipo** (21 clientes, semilla fija; `scripts/make_fixture.py`).
   Está en el repositorio y es lo que usan las pruebas, el CI y un clon limpio.
