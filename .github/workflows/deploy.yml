@@ -1,0 +1,69 @@
+name: Deploy
+
+# Despliega a la VM cuando el CI de main termina en verde. No se ejecuta si la variable DEPLOY_ENABLED no es 'true'
+# (interruptor: Settings > Secrets and variables > Actions > Variables). Ver docs/DEPLOY.md.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Un deploy a la vez; un push posterior espera, no cancela uno en curso.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Desplegar a la VM
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: >-
+      vars.DEPLOY_ENABLED == 'true' && (
+        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+        (github.event_name == 'workflow_run' &&
+         github.event.workflow_run.conclusion == 'success' &&
+         github.event.workflow_run.event == 'push' &&
+         github.event.workflow_run.head_branch == 'main' &&
+         github.event.workflow_run.head_repository.full_name == github.repository)
+      )
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Omitir si ya hay un commit más nuevo en main (ese se desplegará)
+        id: fresh
+        run: |
+          tip=$(git ls-remote origin refs/heads/main | cut -f1)
+          if [ "$tip" = "$(git rev-parse HEAD)" ]; then echo "go=true" >> "$GITHUB_OUTPUT"; else echo "main avanzó ($tip); se omite $(git rev-parse --short HEAD)"; fi
+
+      - name: Preparar SSH
+        if: steps.fresh.outputs.go == 'true'
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Enviar el commit y desplegar (rollback automático si no queda saludable)
+        if: steps.fresh.outputs.go == 'true'
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          git archive --format=tar HEAD | ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -T "deploy@${DEPLOY_HOST}" "$(git rev-parse HEAD)"
+
+      - name: Comprobar el enlace público
+        if: steps.fresh.outputs.go == 'true' && vars.DEPLOY_URL != ''
+        run: |
+          for i in 1 2 3 4 5; do
+            curl -fsS -m 15 "${{ vars.DEPLOY_URL }}/v1/meta" && exit 0
+            sleep 5
+          done
+          echo "el enlace público no responde" >&2; exit 1

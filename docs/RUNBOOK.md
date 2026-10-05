@@ -3,6 +3,8 @@
 Los organizadores avisarán cuándo empieza la evaluación; el servicio se levanta entonces y se apaga al terminar, para no
 incurrir en costos. Este documento es para que **cualquiera del equipo** pueda hacerlo en pocos minutos.
 
+> Alternativa sin túnel: la VM de DigitalOcean con despliegue automático al fusionar a `main` (ver `docs/DEPLOY.md`).
+
 ## Antes (con anticipación, una sola vez)
 
 1. Clonar el repositorio y comprobar que arranca desde cero: `docker compose up --build` y abrir `http://localhost:8080`.
