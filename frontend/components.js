@@ -91,8 +91,8 @@
     box.setAttribute("role", "note");
     box.appendChild(el("span", "disclaimer-icon")).appendChild(icon(kind === "final" ? "shield" : "alert"));
     append(box, [append(el("div", "disclaimer-body"), [
-      el("strong", "disclaimer-title", t("disclaimer." + kind + "Title")),
-      el("span", "disclaimer-text", t("disclaimer." + kind + "Text"))])]);
+      el("strong", "disclaimer-title", t("simNotice." + kind + "Title")),
+      el("span", "disclaimer-text", t("simNotice." + kind + "Text"))])]);
     return box;
   };
 

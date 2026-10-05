@@ -116,20 +116,20 @@ T: dict[str, dict[str, str | list[str]]] = {
     },
     # ---------------------------------------------------------------- resultados de la politica (texto fijo, revisado)
     "eligible": {
-        "es": "{fx}Buenas noticias: con los datos que tenemos, un {product} de {amount} a {months} meses es viable. La cuota sería de unos {payment} al mes, con una tasa anual de {rate}. Con esta cuota, sus pagos de créditos sumarían {dti} de su ingreso mensual; el límite es {max_dti}. Tenga en cuenta que es una simulación: la aprobación final depende de la verificación del banco.",
-        "pt": "{fx}Boas notícias: com os dados que temos, um {product} de {amount} em {months} meses é viável. A parcela seria de cerca de {payment} por mês, com taxa anual de {rate}. Com essa parcela, seus pagamentos de crédito somariam {dti} da sua renda mensal; o limite é {max_dti}. Lembre que é uma simulação: a aprovação final depende da verificação do banco.",
+        "es": "{fx}Buenas noticias: con los datos que tenemos, un {product} de {amount} a {months} meses es viable. La cuota sería de unos {payment} al mes, con una tasa anual de {rate}. Con esta cuota, sus pagos de créditos sumarían {dti} de su ingreso mensual; el límite es {max_dti}. La aprobación final depende de la verificación del banco.",
+        "pt": "{fx}Boas notícias: com os dados que temos, um {product} de {amount} em {months} meses é viável. A parcela seria de cerca de {payment} por mês, com taxa anual de {rate}. Com essa parcela, seus pagamentos de crédito somariam {dti} da sua renda mensal; o limite é {max_dti}. A aprovação final depende da verificação do banco.",
     },
     "eligible_card": {
-        "es": "{fx}Buenas noticias: con los datos que tenemos, puede acceder a una {product} con un cupo de {amount} y una tasa anual de {rate}. Si usara todo el cupo, la cuota para pagarlo en {months} meses sería de unos {payment} al mes, y sus pagos de créditos sumarían {dti} de su ingreso mensual; el límite es {max_dti}. Es una simulación: la aprobación final depende de la verificación del banco.",
-        "pt": "{fx}Boas notícias: com os dados que temos, você pode ter um {product} com limite de {amount} e taxa anual de {rate}. Se usasse todo o limite, a parcela para pagar em {months} meses seria de cerca de {payment} por mês, e seus pagamentos de crédito somariam {dti} da sua renda mensal; o limite é {max_dti}. É uma simulação: a aprovação final depende da verificação do banco.",
+        "es": "{fx}Buenas noticias: con los datos que tenemos, puede acceder a una {product} con un cupo de {amount} y una tasa anual de {rate}. Si usara todo el cupo, la cuota para pagarlo en {months} meses sería de unos {payment} al mes, y sus pagos de créditos sumarían {dti} de su ingreso mensual; el límite es {max_dti}. La aprobación final depende de la verificación del banco.",
+        "pt": "{fx}Boas notícias: com os dados que temos, você pode ter um {product} com limite de {amount} e taxa anual de {rate}. Se usasse todo o limite, a parcela para pagar em {months} meses seria de cerca de {payment} por mês, e seus pagamentos de crédito somariam {dti} da sua renda mensal; o limite é {max_dti}. A aprovação final depende da verificação do banco.",
     },
     "eligible_card_provisional": {
-        "es": "{fx}Con los datos que usted me indicó, puede acceder a una {product} con un cupo de {amount} y una tasa anual de {rate}, sujeta a verificar esos datos. Si usara todo el cupo, la cuota para pagarlo en {months} meses sería de unos {payment} al mes. Con esta cuota, sus pagos de créditos sumarían {dti} de su ingreso mensual; el límite es {max_dti}. Es una simulación.",
-        "pt": "{fx}Com os dados que você informou, você pode ter um {product} com limite de {amount} e taxa anual de {rate}, sujeito à verificação desses dados. Se usasse todo o limite, a parcela para pagar em {months} meses seria de cerca de {payment} por mês. Com essa parcela, seus pagamentos de crédito somariam {dti} da sua renda mensal; o limite é {max_dti}. É uma simulação.",
+        "es": "{fx}Con los datos que usted me indicó, puede acceder a una {product} con un cupo de {amount} y una tasa anual de {rate}, sujeta a verificar esos datos. Si usara todo el cupo, la cuota para pagarlo en {months} meses sería de unos {payment} al mes. Con esta cuota, sus pagos de créditos sumarían {dti} de su ingreso mensual; el límite es {max_dti}.",
+        "pt": "{fx}Com os dados que você informou, você pode ter um {product} com limite de {amount} e taxa anual de {rate}, sujeito à verificação desses dados. Se usasse todo o limite, a parcela para pagar em {months} meses seria de cerca de {payment} por mês. Com essa parcela, seus pagamentos de crédito somariam {dti} da sua renda mensal; o limite é {max_dti}.",
     },
     "eligible_provisional": {
-        "es": "{fx}Con los datos que usted me indicó, un {product} de {amount} a {months} meses es viable, aunque queda sujeto a verificar esos datos. La cuota sería de unos {payment} al mes, con una tasa anual de {rate}. Con esta cuota, sus pagos de créditos sumarían {dti} de su ingreso mensual; el límite es {max_dti}. Es una simulación.",
-        "pt": "{fx}Com os dados que você informou, um {product} de {amount} em {months} meses é viável, mas fica sujeito à verificação desses dados. A parcela seria de cerca de {payment} por mês, com taxa anual de {rate}. Com essa parcela, seus pagamentos de crédito somariam {dti} da sua renda mensal; o limite é {max_dti}. É uma simulação.",
+        "es": "{fx}Con los datos que usted me indicó, un {product} de {amount} a {months} meses es viable, aunque queda sujeto a verificar esos datos. La cuota sería de unos {payment} al mes, con una tasa anual de {rate}. Con esta cuota, sus pagos de créditos sumarían {dti} de su ingreso mensual; el límite es {max_dti}.",
+        "pt": "{fx}Com os dados que você informou, um {product} de {amount} em {months} meses é viável, mas fica sujeito à verificação desses dados. A parcela seria de cerca de {payment} por mês, com taxa anual de {rate}. Com essa parcela, seus pagamentos de crédito somariam {dti} da sua renda mensal; o limite é {max_dti}.",
     },
     "declined_dti": {
         "es": "{fx}Con esa cuota usaría {dti} de su ingreso, y el máximo que manejamos es {max_dti}. Con su situación actual, lo más alto que podríamos simular a {months} meses es {max_amount}. Si sus ingresos cambiaron, cuénteme y lo recalculo.",
@@ -161,16 +161,16 @@ T: dict[str, dict[str, str | list[str]]] = {
     },
     # Sin monto: se presenta primero lo mas alto (la opcion destacada de gold) y se pregunta cuanto necesita.
     "offer_featured": {
-        "es": "{fx}Para su {product}, lo más alto que puedo ofrecerle hoy es {max_amount} a {months} meses, con una tasa anual de {rate} y una cuota de unos {payment} al mes. ¿Qué monto necesita? Si le sirve ese, dígame que sí. Es una simulación.",
-        "pt": "{fx}Para o seu {product}, o máximo que posso oferecer hoje é {max_amount} em {months} meses, com taxa anual de {rate} e parcela de cerca de {payment} por mês. Qual valor você precisa? Se esse servir, é só dizer sim. É uma simulação.",
+        "es": "{fx}Para su {product}, lo más alto que puedo ofrecerle hoy es {max_amount} a {months} meses, con una tasa anual de {rate} y una cuota de unos {payment} al mes. ¿Qué monto necesita? Si le sirve ese, dígame que sí.",
+        "pt": "{fx}Para o seu {product}, o máximo que posso oferecer hoje é {max_amount} em {months} meses, com taxa anual de {rate} e parcela de cerca de {payment} por mês. Qual valor você precisa? Se esse servir, é só dizer sim.",
     },
     "offer_featured_card": {
-        "es": "{fx}Lo más alto que puedo ofrecerle hoy es una {product} con un cupo de hasta {max_amount} y una tasa anual de {rate}. ¿Qué cupo necesita? Si le sirve ese, dígame que sí. Es una simulación.",
-        "pt": "{fx}O máximo que posso oferecer hoje é um {product} com limite de até {max_amount} e taxa anual de {rate}. Qual limite você precisa? Se esse servir, é só dizer sim. É uma simulação.",
+        "es": "{fx}Lo más alto que puedo ofrecerle hoy es una {product} con un cupo de hasta {max_amount} y una tasa anual de {rate}. ¿Qué cupo necesita? Si le sirve ese, dígame que sí.",
+        "pt": "{fx}O máximo que posso oferecer hoje é um {product} com limite de até {max_amount} e taxa anual de {rate}. Qual limite você precisa? Se esse servir, é só dizer sim.",
     },
     "offers": {
-        "es": "Con los datos del banco, esto es lo más alto que puedo ofrecerle hoy: {lines}. Es una simulación. ¿Cuál le interesa y por qué monto?",
-        "pt": "Com os dados do banco, isto é o máximo que posso oferecer hoje: {lines}. É uma simulação. Qual interessa e de que valor?",
+        "es": "Con los datos del banco, esto es lo más alto que puedo ofrecerle hoy: {lines}. ¿Cuál le interesa y por qué monto?",
+        "pt": "Com os dados do banco, isto é o máximo que posso oferecer hoje: {lines}. Qual interessa e de que valor?",
     },
     "offer_line": {
         "es": "{product} de hasta {max_amount} a {months} meses (tasa anual {rate})",
@@ -181,8 +181,8 @@ T: dict[str, dict[str, str | list[str]]] = {
         "pt": "{product} com limite de até {max_amount} (taxa anual {rate})",
     },
     "offers_declared": {
-        "es": "Con el ingreso que usted me indicó, sujeto a verificación, esto es lo más alto que puedo ofrecerle hoy: {lines}. Es una simulación. ¿Cuál le interesa y por qué monto?",
-        "pt": "Com a renda que você informou, sujeita a verificação, isto é o máximo que posso oferecer hoje: {lines}. É uma simulação. Qual interessa e de que valor?",
+        "es": "Con el ingreso que usted me indicó, sujeto a verificación, esto es lo más alto que puedo ofrecerle hoy: {lines}. ¿Cuál le interesa y por qué monto?",
+        "pt": "Com a renda que você informou, sujeita a verificação, isto é o máximo que posso oferecer hoje: {lines}. Qual interessa e de que valor?",
     },
     "offers_none": {
         "es": "Con su capacidad de pago actual no alcanzo el monto mínimo de ninguno de nuestros créditos. Si sus ingresos cambiaron, cuénteme y lo recalculo.",
@@ -271,12 +271,12 @@ T: dict[str, dict[str, str | list[str]]] = {
     },
     # ---------------------------------------------------------------- oferta proactiva
     "offer_proactive": {
-        "es": "Por cierto, {first_name}: según los datos del banco ya tiene una preaprobación indicativa de un {product} de hasta {max_amount} a {months} meses, con una tasa anual de {rate}. Es una simulación, sujeta a verificación y aprobación final. ¿Le interesa que le cuente más?",
-        "pt": "A propósito, {first_name}: com base nos dados do banco você já tem uma pré-aprovação indicativa de um {product} de até {max_amount} em {months} meses, com taxa anual de {rate}. É uma simulação, sujeita a verificação e aprovação final. Quer que eu conte mais?",
+        "es": "Por cierto, {first_name}: según los datos del banco ya tiene una preaprobación indicativa de un {product} de hasta {max_amount} a {months} meses, con una tasa anual de {rate}, sujeta a verificación y aprobación final. ¿Le interesa que le cuente más?",
+        "pt": "A propósito, {first_name}: com base nos dados do banco você já tem uma pré-aprovação indicativa de um {product} de até {max_amount} em {months} meses, com taxa anual de {rate}, sujeita a verificação e aprovação final. Quer que eu conte mais?",
     },
     "offer_proactive_card": {
-        "es": "Por cierto, {first_name}: según los datos del banco ya tiene una preaprobación indicativa de una {product} con un cupo de hasta {max_amount} y una tasa anual de {rate}. Es una simulación, sujeta a verificación y aprobación final. ¿Le interesa que le cuente más?",
-        "pt": "A propósito, {first_name}: com base nos dados do banco você já tem uma pré-aprovação indicativa de um {product} com limite de até {max_amount} e taxa anual de {rate}. É uma simulação, sujeita a verificação e aprovação final. Quer que eu conte mais?",
+        "es": "Por cierto, {first_name}: según los datos del banco ya tiene una preaprobación indicativa de una {product} con un cupo de hasta {max_amount} y una tasa anual de {rate}, sujeta a verificación y aprobación final. ¿Le interesa que le cuente más?",
+        "pt": "A propósito, {first_name}: com base nos dados do banco você já tem uma pré-aprovação indicativa de um {product} com limite de até {max_amount} e taxa anual de {rate}, sujeita a verificação e aprovação final. Quer que eu conte mais?",
     },
     "offer_accepted": {
         "es": "Perfecto. ¿Qué monto necesita? Puede ser hasta {max_amount}; dígame también el plazo en meses si lo prefiere distinto (si no, uso {months}).",
@@ -338,12 +338,12 @@ T: dict[str, dict[str, str | list[str]]] = {
         "pt": "• Produto: {product}\n• Valor: {amount}\n• Prazo: {months} meses\n• Taxa anual: {rate}\n• Parcela mensal estimada: {payment}\n• Seus pagamentos de crédito com esta parcela: {dti} da sua renda mensal (limite {max_dti})\n• Situação: {status}\n• Documentação: {docs_status}{ticket_line}",
     },
     "email_notice": {
-        "es": "Le enviaremos el detalle completo en un PDF al correo registrado ({email}). Es un resumen informativo: la aprobación final depende de la verificación del banco.",
-        "pt": "Enviaremos o detalhe completo em um PDF para o e-mail cadastrado ({email}). É um resumo informativo: a aprovação final depende da verificação do banco.",
+        "es": "Le enviaremos el detalle completo en un PDF al correo registrado ({email}).",
+        "pt": "Enviaremos o detalhe completo em um PDF para o e-mail cadastrado ({email}).",
     },
     "email_notice_noaddr": {
-        "es": "Le enviaremos el detalle completo en un PDF al correo que tenemos registrado. Es un resumen informativo: la aprobación final depende de la verificación del banco.",
-        "pt": "Enviaremos o detalhe completo em um PDF para o e-mail que temos cadastrado. É um resumo informativo: a aprovação final depende da verificação do banco.",
+        "es": "Le enviaremos el detalle completo en un PDF al correo que tenemos registrado.",
+        "pt": "Enviaremos o detalhe completo em um PDF para o e-mail que temos cadastrado.",
     },
 }
 

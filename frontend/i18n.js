@@ -32,7 +32,7 @@ window.CHAT_I18N = {
     endedText: "Gracias por usar el asistente. Su sesión se cerró.",
     newChat: "Nueva conversación",
     offer: "Oferta indicativa",
-    disclaimer: {
+    simNotice: {
       simulationTitle: "Simulación · no es una aprobación",
       simulationText: "Cifras indicativas con los datos del banco, sujetas a verificación.",
       finalTitle: "Oferta indicativa · no es una aprobación",
@@ -197,7 +197,7 @@ window.CHAT_I18N = {
     endedText: "Obrigado por usar o assistente. Sua sessão foi encerrada.",
     newChat: "Nova conversa",
     offer: "Oferta indicativa",
-    disclaimer: {
+    simNotice: {
       simulationTitle: "Simulação · não é uma aprovação",
       simulationText: "Valores indicativos com os dados do banco, sujeitos a verificação.",
       finalTitle: "Oferta indicativa · não é uma aprovação",

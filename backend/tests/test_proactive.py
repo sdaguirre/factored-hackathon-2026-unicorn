@@ -32,7 +32,7 @@ def test_offer_is_made_when_the_conversation_closes(client, state, groups, closi
     sid, h, _ = start(client, state, groups, "consent_pre")
     r = say(client, sid, h, closing)
     assert r["proactive_offer"] is True and r["awaiting"] == "offer_interest"
-    assert "simulación" in r["reply"] and "preaprobación" in r["reply"] and r["suggested_replies"] == ["Sí", "No"]
+    assert r["disclaimer"] == "simulation" and "preaprobación" in r["reply"] and r["suggested_replies"] == ["Sí", "No"]
     assert any(a["type"] == "proactive_offer_made" and a["basis"] == "bank_data_only"
                for a in state.store.get(sid).actions)
 
