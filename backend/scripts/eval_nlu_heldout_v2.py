@@ -8,6 +8,8 @@ Usage (from backend/):
     python scripts/eval_nlu_heldout_v2.py --no-llm                    # rules only, no network
     python scripts/eval_nlu_heldout_v2.py --runs 2 --out eval/results/nlu_heldout_v2.json
     python scripts/eval_nlu_heldout_v2.py --labels eval/annotation/nlu_heldout_v2_adjudicated.csv
+    python scripts/eval_nlu_heldout_v2.py --rescore eval/results/nlu_heldout_v2.json \
+        --labels eval/annotation/nlu_heldout_v2_adjudicated.csv --out eval/results/nlu_heldout_v2_final.json
 
 The LLM needs ANTHROPIC_API_KEY (or CHAT_ANTHROPIC_API_KEY) in the environment or backend/.env. Cost assumption:
 --usd-per-mtok-in / --usd-per-mtok-out (defaults: Claude Haiku 4.5 list prices, 1 and 5 USD per million tokens).
@@ -58,31 +60,39 @@ def load_cases(labels: str | None) -> list[tuple]:
             for i, (t, _, lang, _, pend, stratum) in enumerate(HELDOUT_V2, start=1)]
 
 
-def score(name: str, predict, cases) -> dict:
-    hits, preds, failures = [], [], 0
-    by_lang, by_stratum, by_intent = defaultdict(list), defaultdict(list), defaultdict(list)
-    sens = {"tp": 0, "fn": 0, "fp": 0}
-    misses = []
-    for text, intent, lang, sensitive, pending, stratum in cases:
+def predict_all(predict, cases) -> list[dict]:
+    """One prediction per case, after the same post-processing as the orchestrator. Saved in the report so the
+    metrics can be recomputed with other labels (--rescore) without calling the model again."""
+    out = []
+    for text, _, _, _, pending, _ in cases:
+        error = None
         try:
             r: NLUResult = predict(text, pending)
         except Exception as e:  # noqa: BLE001 - an invalid model output counts as an error, as in production
-            failures += 1
-            r = NLUResult(intent="unknown")
-            misses.append((text, intent, f"ERROR {type(e).__name__}"))
-        r = validate_nlu(r, text)          # same post-processing as the orchestrator (explicit handoff guard)
-        hit = r.intent == intent
+            r, error = NLUResult(intent="unknown"), type(e).__name__
+        r = validate_nlu(r, text)          # explicit handoff guard, as in production
+        out.append({"intent": r.intent, "sensitive_topic": bool(r.sensitive_topic), "error": error})
+    return out
+
+
+def score(name: str, preds: list[dict], cases) -> dict:
+    hits, failures = [], 0
+    by_lang, by_stratum, by_intent = defaultdict(list), defaultdict(list), defaultdict(list)
+    sens = {"tp": 0, "fn": 0, "fp": 0}
+    misses = []
+    for (text, intent, lang, sensitive, _, stratum), pr in zip(cases, preds, strict=True):
+        failures += pr["error"] is not None
+        hit = pr["intent"] == intent
         hits.append(hit)
-        preds.append(r.intent)
         by_lang[lang].append(hit)
         by_stratum[stratum].append(hit)
         by_intent[intent].append(hit)
         if sensitive:
-            sens["tp" if r.sensitive_topic else "fn"] += 1
-        elif r.sensitive_topic:
+            sens["tp" if pr["sensitive_topic"] else "fn"] += 1
+        elif pr["sensitive_topic"]:
             sens["fp"] += 1
-        if not hit and not any(m[0] == text for m in misses):
-            misses.append((text, intent, r.intent))
+        if not hit:
+            misses.append((text, intent, f"ERROR {pr['error']}" if pr["error"] else pr["intent"]))
     n, k = len(hits), sum(hits)
     print(f"\n### {name}: intent accuracy {pct(k, n)}")
     print("   by language: " + " | ".join(f"{g} {pct(sum(v), len(v))}" for g, v in sorted(by_lang.items())))
@@ -137,8 +147,19 @@ def main(a):
           f" Labels: {'adjudicated ' + a.labels if a.labels else 'primary (single annotator until adjudicated)'}")
     report = {"run_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "n": len(cases),
               "labels": a.labels or "primary", "results": []}
+    if a.rescore:
+        saved = json.loads(Path(a.rescore).read_text(encoding="utf-8"))
+        report.update({k: saved[k] for k in ("model", "prompt_chars", "llm_run_disagreements") if k in saved})
+        report["rescored_from"] = {"file": a.rescore, "run_at": saved["run_at"], "labels": saved["labels"]}
+        for res in saved["results"]:
+            new = score(res["name"], res["predictions"], cases)
+            if "efficiency" in res:
+                new["efficiency"] = res["efficiency"]
+            report["results"].append(new)
+        return write(report, a.out)
     rules = MockNLU()
-    report["results"].append(score("Rules baseline (MockNLU)", lambda t, p: rules.extract(t, None, p), cases))
+    report["results"].append(score("Rules baseline (MockNLU)",
+                                   predict_all(lambda t, p: rules.extract(t, None, p), cases), cases))
     if not a.no_llm:
         from app.agent.llm_anthropic import SYSTEM_NLU, AnthropicLLM
         from app.config import Settings
@@ -149,18 +170,22 @@ def main(a):
         runs = []
         for run in range(a.runs):
             llm.calls = []
-            res = score(f"LLM {s.anthropic_model} (run {run + 1})", llm.extract, cases)
+            res = score(f"LLM {s.anthropic_model} (run {run + 1})", predict_all(llm.extract, cases), cases)
             res["efficiency"] = efficiency(llm.calls, a.usd_per_mtok_in, a.usd_per_mtok_out)
             runs.append(res)
             report["results"].append(res)
         if len(runs) > 1:
-            changed = sum(len({r["predictions"][i] for r in runs}) > 1 for i in range(len(cases)))
+            changed = sum(len({r["predictions"][i]["intent"] for r in runs}) > 1 for i in range(len(cases)))
             report["llm_run_disagreements"] = changed
             print(f"\nLLM repeated runs: {changed}/{len(cases)} phrases got a different intent between runs")
-    if a.out:
-        Path(a.out).parent.mkdir(parents=True, exist_ok=True)
-        Path(a.out).write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
-        print(f"\nReport written to {a.out}")
+    write(report, a.out)
+
+
+def write(report: dict, out: str | None) -> None:
+    if out:
+        Path(out).parent.mkdir(parents=True, exist_ok=True)
+        Path(out).write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+        print(f"\nReport written to {out}")
 
 
 if __name__ == "__main__":
@@ -168,6 +193,7 @@ if __name__ == "__main__":
     ap.add_argument("--runs", type=int, default=2)
     ap.add_argument("--no-llm", action="store_true")
     ap.add_argument("--labels", help="adjudicated labels CSV (id, intent, sensitive_topic)")
+    ap.add_argument("--rescore", help="saved JSON report: recompute its metrics with --labels, without calling the model")
     ap.add_argument("--out", help="JSON report path, e.g. eval/results/nlu_heldout_v2.json")
     ap.add_argument("--usd-per-mtok-in", type=float, default=1.0)
     ap.add_argument("--usd-per-mtok-out", type=float, default=5.0)

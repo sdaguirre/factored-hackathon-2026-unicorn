@@ -13,6 +13,7 @@ backend/data/snapshot/
 *.parquet
 !backend/data/fixture/*.parquet
 *.csv
+!backend/eval/annotation/*.csv
 *.rar
 *.zip
 backend/DATOS_DE_PRUEBA.snapshot.md
