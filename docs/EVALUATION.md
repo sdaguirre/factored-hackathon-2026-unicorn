@@ -42,7 +42,13 @@ Fallos hallados en esa prueba y corregidos:
    Ahora el modelo solo reescribe mensajes de bajo riesgo; decisiones, ofertas, derivaciones y avisos salen de plantillas revisadas.
 3. Tasas en portugués mal enrutadas (ver sección 1).
 
-## 3. Pruebas de fallos y seguridad (96 pruebas automáticas, sin red)
+Segunda corrida en vivo tras los flujos de moneda, solicitud, resumen e identidad (`e2e_llm.py`, 6 conversaciones): ~1,0 s
+mediana y ~1,4 s p95 por llamada, ≈ 979 tokens de entrada y ≈ 93 de salida por turno (más que antes: el historial y los
+nuevos prompts). Se probaron frases de identidad; la reescritura del modelo se restringió porque en saludos y rechazos
+empeoraba el texto de las plantillas. El conjunto de desarrollo del NLU creció 5 casos de `ask_identity` (65/65 con Claude,
+~98% con reglas, optimista porque se desarrolló sobre esos casos); el conjunto reservado no se tocó.
+
+## 3. Pruebas de fallos y seguridad (155 pruebas automáticas, sin red)
 
 | Escenario del reto | Cobertura |
 |---|---|
@@ -52,6 +58,9 @@ Fallos hallados en esa prueba y corregidos:
 | Inyección de instrucciones | El texto del cliente es dato: intento de forzar una aprobación no la produce (con LLM falso y con reglas; una frase real se probó con el modelo en vivo) |
 | Falla del LLM | Cae a reglas sin romper el turno; el LLM falso que se equivoca a propósito no logra derivar, ni reescribir decisiones, ni introducir cifras |
 | Ambigüedad multilingüe | Español, portugués, formatos numéricos locales (1.500,00 y 1,500.00) |
+| Moneda | Detección, conversión con tasa del dataset, equivalentes con la misma tasa, monedas no soportadas |
+| Solicitud y documentos | Solo se piden los que faltan; derivación con todo en orden; aviso si falta algo; sin resumen en incidentes |
+| Identidad | Responde con la verdad a «¿eres un robot?»; un texto del modelo que diga ser persona se descarta |
 | Consentimiento y momento de la oferta proactiva | Sin consentimiento, con tema sensible, con sentimiento negativo, tras un rechazo, o ya ofrecida: no se ofrece |
 
 **No cubierto:** fallos de herramientas distintos de la caída del LLM (no hay herramientas externas reales: los datos son
@@ -62,7 +71,13 @@ un snapshot local) y la inyección con muchas variantes contra el modelo real.
 - **Política de crédito** sobre 150.000 clientes, solicitud tipo (préstamo personal, 36 meses, 3 veces el ingreso): 44,2%
   elegible, 27,2% datos faltantes, 18,5% revisión humana, 10,1% rechazado. Una preaprobación fija por segmento
   (Premium y Plus) aprobaría clientes que la política rechaza en 3,9% o manda a pedir datos en 27,4%, y dejaría fuera a un
-  40,6% que sí es elegible. Es la política provisional: no hay verdad de terreno externa.
+  40,6% que sí es elegible. Es la política preliminar del backend: no hay verdad de terreno externa.
+- **Credit policy 0.3 in gold** (Databricks, 150,000 customers, cutoff 2026-06-30): 50,707 eligible (33.8%), 24,953 with a
+  proactive offer and 25,754 only if the customer asks. The Python reference implementation
+  (`data/policy/credit_policy.py`) matches gold on all 1,800,000 options (`data/scripts/check_engine_parity.py`).
+- **Data pipeline quality:** 90 metrics per run in `pipeline_quality_metrics`; 0 key duplicates and 0 content duplicates
+  except 6 repeated `product_number` values; gold built on the typed silver is identical to the previous one, customer by
+  customer. Update fixture (static data): 5 of 5 cases handled correctly, and the assertions fail without the delivery.
 - **Triaje de fraude** (conjunto de prueba de 686.502 transacciones y 603 fraudes, partición temporal): el `fraud_score`
   del organizador da PR-AUC 0,577 y recall 58% revisando el 1% de mayor riesgo, con precisión de 5%. Un modelo sin
   `fraud_score` queda al nivel del azar (PR-AUC 0,0009).

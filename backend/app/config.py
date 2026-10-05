@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tempfile
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
@@ -26,6 +27,8 @@ class Settings(BaseSettings):
     # Integracion externa: lista separada por comas. Vacio = sin API key (solo desarrollo local).
     api_keys: str = ""
     cors_origins: str = ""  # lista separada por comas; vacio = sin CORS
+    # Bandeja de salida de correos (SIMULADA: no se envia nada). En el contenedor /tmp es el unico lugar escribible.
+    outbox_dir: Path = Path(tempfile.gettempdir()) / "chat-outbox"
     # Consola de agentes (GET /v1/handoffs): clave aparte. Sin claves solo se permite con CHAT_ENV=dev.
     admin_api_keys: str = ""
 

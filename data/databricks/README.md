@@ -29,12 +29,13 @@ snake_case; gold tables per customer are `customer_<subject>`.
 | `02_silver_quality_checks.sql` | Bronze/silver metrics in `pipeline_quality_metrics`, then a gate that fails the run | silver | Job `latam_bank_medallion` |
 | `load_silver_reference.sql` | `ref_product_catalog`, `ref_term_grid`, `ref_policy_params`, `ref_policy_bands`, `ref_segment_adjustments` | silver | When a CSV in `data/reference/` changes (`load_reference.py`) |
 | `gold/00_deploy_objects.sql` | `fn_monthly_installment`, `fn_max_principal`, `credit_offers` | gold | Jobs `credit_gold_deploy` and `latam_bank_medallion` (idempotent) |
-| `gold/10_customer_credit_profile.sql` | `customer_credit_profile` | gold | Jobs `latam_bank_medallion` and `credit_policy_refresh` |
+| `gold/10_customer_credit_profile.sql` | `customer_credit_profile` and the agent view `customer_credit_offer_context` | gold | Jobs `latam_bank_medallion` and `credit_policy_refresh` |
 | `gold/20_customer_credit_offer_options.sql` | `customer_credit_offer_options` | gold | After the profile |
 | `gold/30_customer_products_summary.sql` | `customer_products_summary` | gold | Job `latam_bank_medallion` |
 | `gold/31_customer_complaints_summary.sql` | `customer_complaints_summary` | gold | Job `latam_bank_medallion` |
 | `gold/32_customer_cashflow_summary.sql` | `customer_cashflow_summary` | gold | Job `latam_bank_medallion` |
-| `gold/90_quality_checks.sql` | Gold metrics in `pipeline_quality_metrics`, then a gate that fails the run | gold | Last task of both jobs |
+| `gold/90_quality_checks.sql` | Gold metrics in `pipeline_quality_metrics`, then a gate that fails the run | gold | Both jobs, after the gold tables |
+| `gold/95_export_for_serving.py` | Parquet export of the profile, offer options and `ref_*` to the volume `<gold_schema>.exports`, with `_manifest.json` | gold | Last task of both jobs, only after the checks pass |
 | `tests/00_update_fixture_setup.sql`, `tests/99_update_fixture_assertions.sql` | Labeled test delivery on `*_fixture` schemas and the assertions of each case | fixture | Job `data_update_fixture_test` |
 
 ## Gold objects
@@ -42,11 +43,15 @@ snake_case; gold tables per customer are `customer_<subject>`.
 | Object | Grain | Purpose |
 |---|---|---|
 | `customer_credit_profile` | one row per customer | Income used, current installments, 20% capacity, risk band, rate adjustment, maximum terms, reason codes R01–R08, `is_eligible`, `offer_mode`, advisor-review flag, FX used |
-| `customer_credit_offer_options` | customer × `ref_term_grid` option | Alternatives, each using the whole 20% capacity: offer rate, maximum amount, installment and availability, in USD and local currency. Loans at any amount in the product range up to the band maximum term |
+| `customer_credit_offer_options` | customer × `ref_term_grid` option | Alternatives, each using the whole 20% capacity: offer rate, maximum amount, installment and availability, in USD and local currency. Loans at any amount in the product range up to the band maximum term. `is_featured` marks the option to present first per product (highest tier or amount; ties to the shortest term) |
+| `customer_credit_offer_context` (view) | one row per customer | The 25 profile columns the agent and the rules service need (eligibility, offer mode, capacity, pricing inputs, band maximum terms, open complaints). Rebuilt with the profile |
 | `credit_offers` | one row per accepted offer | Written by the API only. Change Data Feed on; CHECK constraints on status, origin, positive amounts and the 20% limit. Never dropped by a deploy |
 | `customer_products_summary`, `customer_complaints_summary`, `customer_cashflow_summary` | one row per customer | Descriptive context (products and delinquency, complaints by type/status/priority, last 90 days of transactions). Not used by the credit rules |
 | `pipeline_quality_metrics` | run × table × metric | Data quality and lineage metrics of every run (`run_id`, `run_at`, `layer`, `table_name`, `metric`, `value`, `threshold`, `status`). Appended, never rebuilt |
 | `fn_monthly_installment`, `fn_max_principal` | — | Annuity formulas the rules service must reproduce exactly |
+
+Every column of the profile, the options and the view has a description in Unity Catalog
+(`ALTER COLUMN ... COMMENT` at the end of `gold/10` and `gold/20`, reapplied on each rebuild).
 
 `offer_mode`: `proactive` (eligible, marketing consent, no open Critical complaint),
 `on_customer_interest` (eligible, offer only if the customer asks about credit) or `none`.
@@ -72,7 +77,8 @@ Gold checks (`gold/90_quality_checks.sql`) fail the run when: the profile does n
 silver customer; cutoff, policy version or exchange rate is missing; the profile was built with a
 different policy version than silver; the eligible share leaves 20–50%; the options are not one per
 customer and grid row; any available option exceeds the 20% capacity, the band maximum term or its
-amount range; a customer summary has duplicate customers; or the gold contract is broken.
+amount range; a product with available options has not exactly one featured option; a
+customer summary has duplicate customers; or the gold contract is broken.
 
 ### Gold contract for the API
 
@@ -82,7 +88,7 @@ is missing or changes type. They are what the backend and `data/policy/credit_po
 | Table | Columns (type) |
 |---|---|
 | `customer_credit_profile` | `customer_id`, `offer_mode`, `not_proactive_reason`, `risk_band`, `segment`, `local_currency`, `income_source`, `policy_version` (string); `is_eligible`, `requires_advisor_review`, `can_become_eligible_with_declared_income` (boolean); `reason_codes` (array<string>); `fx_to_usd`, `income_used_usd`, `current_installments_usd`, `max_total_installment_usd`, `available_installment_usd`, `total_rate_adjustment_pp` (double); `max_term_personal_loan_months`, `max_term_mortgage_months` (int); `open_complaints`, `open_priority_complaints`, `open_critical_complaints` (bigint); `fx_date`, `as_of_date` (date) |
-| `customer_credit_offer_options` | `customer_id`, `option_code`, `product_code`, `product_type`, `tier`, `unavailable_reason`, `offer_mode`, `local_currency` (string); `term_months`, `option_min_amount_usd`, `option_max_amount_usd` (int); `is_available` (boolean); `offer_max_amount_usd` (bigint); `offer_rate_pct`, `offer_monthly_installment_usd`, `offer_max_amount_local`, `offer_monthly_installment_local`, `fx_to_usd` (double) |
+| `customer_credit_offer_options` | `customer_id`, `option_code`, `product_code`, `product_type`, `tier`, `unavailable_reason`, `offer_mode`, `local_currency` (string); `term_months`, `option_min_amount_usd`, `option_max_amount_usd` (int); `is_available`, `is_featured` (boolean); `offer_max_amount_usd` (bigint); `offer_rate_pct`, `offer_monthly_installment_usd`, `offer_max_amount_local`, `offer_monthly_installment_local`, `fx_to_usd` (double) |
 
 Adding columns is safe; renaming, dropping or retyping one of these needs a coordinated change.
 
@@ -111,8 +117,8 @@ default to the target's variables (`dev` → `_test`, `prod` → real schemas).
 
 | Job | Tasks | Trigger |
 |---|---|---|
-| `latam_bank_medallion` | `bronze_load` → `silver_typed_dedup` → `silver_quality_checks` → `gold_deploy_objects` → `gold_customer_credit_profile` → `gold_customer_credit_offer_options`; the three customer summaries in parallel after the silver checks; `gold_quality_checks` last | Daily at 06:00 America/Bogota, deployed **paused** (static data: run by hand) |
-| `credit_policy_refresh` | `gold_customer_credit_profile` → `gold_customer_credit_offer_options` → `gold_quality_checks` | When the policy changes: by hand, or the (paused) `table_update` trigger on the policy `ref_*` tables |
+| `latam_bank_medallion` | `bronze_load` → `silver_typed_dedup` → `silver_quality_checks` → `gold_deploy_objects` → `gold_customer_credit_profile` → `gold_customer_credit_offer_options`; the three customer summaries in parallel after the silver checks; `gold_quality_checks` → `gold_export_for_serving` last | Daily at 06:00 America/Bogota, deployed **paused** (static data: run by hand) |
+| `credit_policy_refresh` | `gold_customer_credit_profile` → `gold_customer_credit_offer_options` → `gold_quality_checks` → `gold_export_for_serving` | When the policy changes: by hand, or the (paused) `table_update` trigger on the policy `ref_*` tables |
 | `credit_gold_deploy` | `gold_deploy_objects` | Manual, once per deploy |
 | `data_update_fixture_test` | `fixture_setup` → `silver_typed_dedup` → `silver_quality_checks` → `fixture_assertions`, on the `*_fixture` schemas | Manual; shows update correctness on static data |
 
@@ -158,6 +164,30 @@ python data/scripts/run_databricks_sql.py data/databricks/gold/00_deploy_objects
 ```
 
 The SQL files can also be opened in the SQL editor, which asks for the parameter values.
+
+## Export for the demo backend
+
+The backend reads Parquet instead of querying Databricks (no credentials in the container). The
+export is part of the pipeline: the last task of `latam_bank_medallion` and `credit_policy_refresh`
+(`gold/95_export_for_serving.py`) writes it to the volume `<gold_schema>.exports` only after the gold
+checks pass, so the demo always serves validated data:
+
+```
+/Volumes/workspace/gold_latam_bank/exports/
+  customer_credit_profile/  customer_credit_offer_options/  ref_*/   one Parquet file each
+  _manifest.json            rows per table, as_of_date, policy_version, run id, export time
+```
+
+The task checks that every exported table has the same row count as its source. Download it for
+the demo and check an engine against it:
+
+```bash
+python data/scripts/export_gold.py --profile <profile>     # -> .local/gold/ (git-ignored)
+python data/scripts/check_engine_parity.py                 # engine vs gold options
+```
+
+`data/policy/credit_policy.py` is a reference implementation of the policy that matches gold on
+all options; see `docs/ENGINE_ALIGNMENT.md` for the backend changes.
 
 ## One-time migration notes
 
