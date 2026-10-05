@@ -64,7 +64,7 @@ python backend/scripts/build_snapshot.py --customers 400                        
 The data and the credit flow are also built in Databricks (Unity Catalog, `workspace` catalog)
 by the `latam_bank_medallion` job: bronze → silver → gold, with quality metrics on every run.
 Run order, objects, quality checks and results are in `data/databricks/README.md`; policy and
-formulas in `docs/CREDIT_RULES.md` (policy 0.3, the reference version of the credit rules).
+formulas in `docs/CREDIT_RULES.md` (policy 0.4, the reference version of the credit rules).
 Every file takes the schemas as parameters, so the same code runs against the `_test` schemas.
 
 | Layer | Objects | Notes |

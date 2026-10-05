@@ -1,8 +1,8 @@
-# Aligning the backend credit engine to policy 0.3
+# Aligning the backend credit engine to policy 0.4
 
 The backend engine (`backend/app/policy/credit_engine.py` + `backend/policy/credit_policy.yaml`)
 was built on a preliminary version of the credit rules so the team could work in parallel.
-Policy 0.3 (`docs/CREDIT_RULES.md`, parameters in `data/reference/`) is the reference version,
+Policy 0.4 (`docs/CREDIT_RULES.md`, parameters in `data/reference/`) is the reference version,
 already computed in Databricks gold. This guide lists what the backend needs so the agent offers
 exactly what gold computes, and the tools that are ready to help.
 
@@ -10,8 +10,8 @@ exactly what gold computes, and the tools that are ready to help.
 
 | Piece | Where | Status |
 |---|---|---|
-| Gold profile and offer options (150,000 customers, 1.8M options) | `workspace.gold_latam_bank` | Built with policy 0.3 |
-| Parquet export of gold + `ref_*` for serving | Written by the jobs to `workspace.gold_latam_bank.exports` (`gold/95_export_for_serving.py`); `data/scripts/export_gold.py` downloads it to `.local/gold/` (git-ignored) | Production export available (2026-06-30 cutoff, policy 0.3) |
+| Gold profile and offer options (150,000 customers, 1.8M options) | `workspace.gold_latam_bank` | Built with policy 0.4 |
+| Parquet export of gold + `ref_*` for serving | Written by the jobs to `workspace.gold_latam_bank.exports` (`gold/95_export_for_serving.py`); `data/scripts/export_gold.py` downloads it to `.local/gold/` (git-ignored) | Production export available (2026-06-30 cutoff, policy 0.4) |
 | Reference implementation of the policy in Python | `data/policy/credit_policy.py` | Matches gold on all 1.8M options, including `is_featured` |
 | Parity check for any engine | `data/scripts/check_engine_parity.py` | 0 mismatches for the reference |
 | Agent view of the profile (25 contract columns, one row per customer) | `workspace.gold_latam_bank.customer_credit_offer_context` | Rebuilt with the profile |
@@ -29,7 +29,7 @@ pytest data/policy                                         # worked example
 
 ## Differences to close
 
-| Topic | Backend today | Policy 0.3 |
+| Topic | Backend today | Policy 0.4 |
 |---|---|---|
 | Bands | 5 bands from score 520 (`score_bands`), spread +6 to −2 | A–E at 740/680/620/560 (`ref_policy_bands`), −2 to +2 pp, plus segment −1 to +1 pp |
 | Rate | Base rate per product (20 / 31.5 / 9) + band spread − 1 pp with 3+ products | `ref_term_grid` rate per term or card tier + band + segment, clamped to the product range |
@@ -40,6 +40,8 @@ pytest data/policy                                         # worked example
 | Existing debt | Card 5% of balance; loans 36/180 months on balance | From gold `current_installments_usd` (grid term on original amount; cards over 60 months) |
 | Hard filters | Status, missing data, delinquency 30/90 | R01–R08 in gold `reason_codes`; only R05 (income) and R08 (capacity) change with chat data |
 | Declared income | Uplift above 50% goes to review | Replaces income used; offer conditional with `F03`; no uplift handoff |
+| Household income | Not asked | Ask every customer (not by marital status); when added, also ask that person's installments and pass both to `recalculate(additional_income_usd=..., external_installments_usd=...)` |
+| Age | Not used | Term capped so loans end before 75 (`max_term_*` in the profile already include it) |
 | Proactive offer | Consent + moment + not pre-approved on declared income | Same, but eligibility and mode from gold `offer_mode` (`proactive` only with consent and no open critical complaint) |
 | Currency | Income currency (local) | USD internally (`fx_to_usd`); local only for display |
 | Flags | — | `F02_NEAR_LIMIT_DECLARED_INCOME`, `F03_DECLARED_DATA`, `F04_OPEN_COMPLAINTS` |
@@ -95,7 +97,7 @@ safe fallback). The repository interface in the backend already allows swapping 
 5. **Handoff summary (`app/agent/handoff.py`).** Include `offer_id`, option, amount, rate,
    installment, `debt_to_income_after`, flags, open complaints and `policy_version`.
 6. **Fixture and tests.** `make_fixture.py` must generate the gold profile columns for its
-   team-made customers. `test_credit_engine.py` (9 tests) is replaced by the policy 0.3 cases;
+   team-made customers. `test_credit_engine.py` (9 tests) is replaced by the policy 0.4 cases;
    `test_proactive.py` keeps its behavior with the new eligibility source.
 
 ## Writing accepted offers
@@ -113,6 +115,6 @@ Two ways to get rows there from the demo:
 ## Done when
 
 - [ ] `check_engine_parity.py --engine <backend function>` reports 0 mismatches.
-- [ ] Backend tests pass with the policy 0.3 cases; CI green.
+- [ ] Backend tests pass with the policy 0.4 cases; CI green.
 - [ ] Demo shows a proactive offer equal to gold, a recalculation with declared income, an
       accepted offer recorded in `credit_offers`, and the advisor handoff with flags.

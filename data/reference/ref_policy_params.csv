@@ -5,5 +5,6 @@ max_days_past_due,30,days,R03 maximum days past due on any active credit product
 min_income_usd,300,USD/month,R05 minimum monthly income,true
 fraud_lookback_days,90,days,R07 window for confirmed fraud transactions,true
 offer_validity_days,30,days,Days an accepted offer stays valid,true
+max_age_at_maturity_years,75,years,Personal loans and mortgages must end before the customer reaches this age: caps the band maximum term (advisor verifies age and life insurance),true
 as_of_date,2026-06-30,date,Serving cutoff date for all indicators,true
-policy_version,0.3,text,Version of the credit policy parameters,true
+policy_version,0.4,text,Version of the credit policy parameters,true

@@ -78,7 +78,7 @@ FROM read_files(
 );
 
 -- =============================================================================================
--- Credit policy parameters (policy_version 0.3). Read by the gold SQL and by the rules service,
+-- Credit policy parameters (policy_version 0.4). Read by the gold SQL and by the rules service,
 -- so both compute offers with the same values. See docs/CREDIT_RULES.md.
 -- =============================================================================================
 CREATE OR REPLACE TABLE IDENTIFIER(:silver_schema || '.ref_policy_params') (
@@ -95,7 +95,7 @@ COMMENT 'SYNTHETIC scalar credit policy parameters: 20% debt-to-income hard limi
 
 INSERT INTO IDENTIFIER(:silver_schema || '.ref_policy_params')
 SELECT param_name, param_value, unit, description, is_synthetic,
-       '0.3', _metadata.file_path, current_timestamp()
+       '0.4', _metadata.file_path, current_timestamp()
 FROM read_files(
     '/Volumes/workspace/silver_latam_bank/reference/ref_policy_params.csv',
     format => 'csv', header => true,
@@ -120,7 +120,7 @@ COMMENT 'SYNTHETIC risk bands by credit_score: eligibility (band E has no offer)
 INSERT INTO IDENTIFIER(:silver_schema || '.ref_policy_bands')
 SELECT band, min_credit_score, rate_adjustment_pp, offer_allowed,
        max_term_personal_loan_months, max_term_mortgage_months, is_synthetic,
-       '0.3', _metadata.file_path, current_timestamp()
+       '0.4', _metadata.file_path, current_timestamp()
 FROM read_files(
     '/Volumes/workspace/silver_latam_bank/reference/ref_policy_bands.csv',
     format => 'csv', header => true,
@@ -140,7 +140,7 @@ COMMENT 'SYNTHETIC rate adjustment by customer segment. Static: loaded from data
 
 INSERT INTO IDENTIFIER(:silver_schema || '.ref_segment_adjustments')
 SELECT segment, rate_adjustment_pp, is_synthetic,
-       '0.3', _metadata.file_path, current_timestamp()
+       '0.4', _metadata.file_path, current_timestamp()
 FROM read_files(
     '/Volumes/workspace/silver_latam_bank/reference/ref_segment_adjustments.csv',
     format => 'csv', header => true,

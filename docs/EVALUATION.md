@@ -72,7 +72,7 @@ un snapshot local) y la inyección con muchas variantes contra el modelo real.
   elegible, 27,2% datos faltantes, 18,5% revisión humana, 10,1% rechazado. Una preaprobación fija por segmento
   (Premium y Plus) aprobaría clientes que la política rechaza en 3,9% o manda a pedir datos en 27,4%, y dejaría fuera a un
   40,6% que sí es elegible. Es la política preliminar del backend: no hay verdad de terreno externa.
-- **Credit policy 0.3 in gold** (Databricks, 150,000 customers, cutoff 2026-06-30): 50,707 eligible (33.8%), 24,953 with a
+- **Credit policy 0.4 in gold** (Databricks, 150,000 customers, cutoff 2026-06-30): 50,707 eligible (33.8%), 24,953 with a
   proactive offer and 25,754 only if the customer asks. The Python reference implementation
   (`data/policy/credit_policy.py`) matches gold on all 1,800,000 options (`data/scripts/check_engine_parity.py`).
 - **Data pipeline quality:** 90 metrics per run in `pipeline_quality_metrics`; 0 key duplicates and 0 content duplicates
