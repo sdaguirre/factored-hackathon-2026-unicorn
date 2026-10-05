@@ -90,8 +90,8 @@ T: dict[str, dict[str, str | list[str]]] = {
                "Obrigado, deixei anotado. Conecto você a um consultor agora ou quer me contar mais alguma coisa?"],
     },
     "handoff_declined_support": {
-        "es": ["De acuerdo, no lo conecto por ahora. ¿Hay algo más en lo que le pueda ayudar?", "Sin problema, lo dejamos así. Si cambia de opinión, me avisa. ¿Algo más?"],
-        "pt": ["Certo, não conecto por enquanto. Posso ajudar em mais alguma coisa?", "Sem problema, deixamos assim. Se mudar de ideia, é só avisar. Algo mais?"],
+        "es": ["De acuerdo, no lo conecto por ahora. ¿Hay algo más en lo que le pueda ayudar?", "Sin problema, lo dejamos así. Si cambia de opinión, me avisa. ¿Tiene otra duda?"],
+        "pt": ["Certo, não conecto por enquanto. Posso ajudar em mais alguma coisa?", "Sem problema, deixamos assim. Se mudar de ideia, é só avisar. Tem outra dúvida?"],
     },
     # Se antepone al mensaje cuando el cliente se muestra molesto (no mas de una vez cada pocos turnos).
     "empathy_negative": {
@@ -252,8 +252,8 @@ T: dict[str, dict[str, str | list[str]]] = {
     },
     # ---------------------------------------------------------------- derivacion a un asesor
     "handoff_created": {
-        "es": "Listo, ya pasé su caso a un asesor con el resumen de esta conversación; su número de seguimiento es {ticket}. No tendrá que repetir nada.",
-        "pt": "Pronto, já passei seu caso a um consultor com o resumo desta conversa; seu número de acompanhamento é {ticket}. Você não precisará repetir nada.",
+        "es": "Listo, ya pasé su caso a un asesor con el resumen de esta conversación; su número de seguimiento es {ticket}. El asesor ya tiene todo lo que me contó, así que no tendrá que repetirlo.",
+        "pt": "Pronto, já passei seu caso a um consultor com o resumo desta conversa; seu número de acompanhamento é {ticket}. O consultor já tem tudo o que você me contou, então não precisará repetir.",
     },
     "handoff_declined": {
         "es": ["De acuerdo, lo dejamos así. ¿Quiere consultar otro monto o plazo?", "Sin problema. ¿Le ayudo con otro monto o plazo?"],
@@ -321,8 +321,8 @@ T: dict[str, dict[str, str | list[str]]] = {
         "pt": "{lead}Você tem {doc}?",
     },
     "application_ready": {
-        "es": "Perfecto, ya tengo todo lo necesario. Pasé su solicitud a un asesor para la revisión final; su número de seguimiento es {ticket}. No tendrá que repetirle lo que ya me contó.",
-        "pt": "Perfeito, já tenho tudo o que preciso. Encaminhei sua solicitação a um consultor para a revisão final; seu número de acompanhamento é {ticket}. Você não precisará repetir o que já me contou.",
+        "es": "Perfecto, ya tengo todo lo necesario. Pasé su solicitud a un asesor para la revisión final; su número de seguimiento es {ticket}. El asesor ya tiene todo lo que me contó, así que no tendrá que repetirlo.",
+        "pt": "Perfeito, já tenho tudo o que preciso. Encaminhei sua solicitação a um consultor para a revisão final; seu número de acompanhamento é {ticket}. O consultor já tem tudo o que você me contou, então não precisará repetir.",
     },
     "docs_incomplete": {
         "es": "Todavía me falta: {missing}. Puede enviarlo respondiendo al correo con el resumen, o llevarlo a una sucursal. ¿Quiere que un asesor lo contacte para ver cómo avanzar?",
