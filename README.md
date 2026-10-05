@@ -50,7 +50,9 @@ docker compose up --build        # interfaz en http://localhost:8080
 | Pruebas automáticas del backend | 96 pruebas, sin red | No cubren la calidad conversacional del modelo real |
 | Intención del NLU, conjunto **reservado** (29 frases es/pt) | Reglas 79%. Claude 93–97% (dos corridas) | Una sola persona etiquetó; muestra pequeña |
 | Prueba en vivo con Claude Haiku 4.5 (13 turnos) | 0 caídas a reglas; ~1,1 s por llamada (p95 1,7 s); ~490 tokens de entrada y ~105 de salida por turno | Muestra pequeña, no es un benchmark |
-| Política de crédito sobre 150.000 clientes (solicitud tipo) | 44,2% elegible, 27,2% datos faltantes, 18,5% revisión humana, 10,1% rechazado | La política es inventada: no hay verdad de terreno externa |
+| Política de crédito preliminar del backend sobre 150.000 clientes (solicitud tipo) | 44,2% elegible, 27,2% datos faltantes, 18,5% revisión humana, 10,1% rechazado | Versión preliminar; se reemplaza por la 0.3 (fila siguiente) |
+| Política de crédito 0.3 en gold (Databricks), 150.000 clientes | 50.707 elegibles (33,8%); 24.953 con oferta proactiva; sin oferta sobre todo por ingreso faltante (30.033, recuperable en el chat) o producto bloqueado (25.519). La implementación en Python coincide con gold en las 1,8 M opciones | Política sintética definida por el equipo; sin verdad de terreno externa |
+| Pipeline de datos en Databricks (bronze → silver → gold) | Job completo en ~14 min; 90 métricas de calidad por corrida; 0 duplicados por clave; fixture de actualización: 5 de 5 casos correctos | Datos estáticos: la actualización se demuestra con un fixture etiquetado, no con entregas reales |
 | Baseline de fraude con `fraud_score` del organizador | PR-AUC 0,577; recall 58% revisando el 1% con mayor riesgo; precisión 5% | Sin `fraud_score`, ningún modelo supera al azar en estos datos |
 
 Detalle, errores hallados y lo que falta medir: [`docs/EVALUATION.md`](docs/EVALUATION.md).
@@ -61,17 +63,21 @@ Detalle, errores hallados y lo que falta medir: [`docs/EVALUATION.md`](docs/EVAL
 |---|---|
 | Problema respaldado por datos | [`docs/DATA.md`](docs/DATA.md), [`analysis/`](analysis/) |
 | Sistema de IA funcionando | [`backend/`](backend/), [`frontend/`](frontend/) |
-| Automatización controlada, permisos fuera del texto del modelo, resumen para el humano | `backend/app/agent/`, `backend/app/policy/`, `backend/policy/credit_policy.yaml` |
-| Práctica de datos y ML sana | [`data/sql/`](data/sql/), [`analysis/`](analysis/), [`backend/eval/`](backend/eval/) |
+| Automatización controlada, permisos fuera del texto del modelo, resumen para el humano | `backend/app/agent/`, `backend/app/policy/`, reglas de crédito en [`docs/CREDIT_RULES.md`](docs/CREDIT_RULES.md) |
+| Práctica de datos y ML sana | [`data/databricks/`](data/databricks/) (medallion, calidad, contrato, fixture), [`data/reference/`](data/reference/), [`data/policy/`](data/policy/), [`analysis/`](analysis/), [`backend/eval/`](backend/eval/) |
 | Calidad medida y manejo de fallos | [`docs/EVALUATION.md`](docs/EVALUATION.md), `backend/tests/` |
-| Ruta a operación | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/RUNBOOK.md`](docs/RUNBOOK.md) |
+| Ruta a operación | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/RUNBOOK.md`](docs/RUNBOOK.md), [`data/databricks/README.md`](data/databricks/README.md) (jobs, métricas, reintentos) |
 
 ## Estructura
 
 ```
 backend/    API FastAPI, agente, política de crédito, pruebas, evaluación del NLU, Dockerfile
 frontend/   interfaz de chat (HTML/CSS/JS sin dependencias) + nginx
-data/sql/   SQL de la capa gold (DuckDB) y su contrato
+data/databricks/  pipeline medallion en Databricks: bronze, silver, gold, calidad, jobs (Asset Bundle), fixture
+data/reference/   tablas de referencia sintéticas: catálogo, grilla de tasas y plazos, parámetros de la política
+data/policy/      implementación de referencia de la política de crédito (Python) y sus pruebas
+data/scripts/     carga de referencias, ejecución de SQL, exportación de gold, prueba de paridad
+data/sql/   SQL de la capa gold en DuckDB (exploración local)
 analysis/   exploración de datos, baselines (notebooks) y scripts de validación
 docs/       arquitectura, datos, evaluación, runbook
 ```
@@ -88,11 +94,17 @@ reconstruir el snapshot derivado del dataset real se necesita acceso al bucket d
 - **Falta una evaluación de punta a punta** con un conjunto reservado de conversaciones completas y las métricas del
   enunciado (resolución automática segura, contención, calidad del escalamiento, resultados inseguros con
   denominadores, latencia y costo por resolución, por idioma). Hoy hay pruebas unitarias y la evaluación del NLU.
-- La política de crédito es provisional; sus cortes (20% de endeudamiento, bandas de score, tasas) los debe validar el equipo.
+- El backend todavía evalúa con la política preliminar (`backend/policy/credit_policy.yaml`). La versión de referencia es la
+  0.3 ([`docs/CREDIT_RULES.md`](docs/CREDIT_RULES.md), [`data/reference/`](data/reference/)), ya calculada en Databricks;
+  la alineación del motor está en curso ([`docs/ENGINE_ALIGNMENT.md`](docs/ENGINE_ALIGNMENT.md)).
+- No hay modelo de riesgo aprendido: la banda sale del `credit_score`. En estos datos la mora no se relaciona con el score,
+  así que un modelo tiene poca señal; queda por evaluar contra ese baseline.
 - La verificación por preguntas de seguridad tiene 1/64 de probabilidad de acierto al azar por intento; mitigada con
   bloqueo, pero no sustituye un segundo factor real.
 - Sesiones, bloqueos y cola de derivaciones viven en memoria (una réplica). Para producción hay que externalizarlos.
-- Los datos de la capa gold están en SQL de DuckDB; la migración a Databricks y un proyecto dbt no están en este repositorio.
+- La capa de datos corre en Databricks como jobs del bundle (`data/databricks/`), pero la demo lee una exportación a Parquet
+  (datos estáticos, sin credenciales en el contenedor). Permisos mínimos por *service principal*, alertas sobre las
+  métricas y despliegue automático a producción están descritos, no implementados (ver `docs/ARCHITECTURE.md`).
 - La interfaz solo se probó a mano; no hay pruebas automáticas ni auditoría de accesibilidad con lector de pantalla.
 
 ## Cómo trabajamos
