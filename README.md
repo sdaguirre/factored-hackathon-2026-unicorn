@@ -64,7 +64,7 @@ docker compose up --build        # UI at http://localhost:8080
 | Backend automated tests | 253 tests, no network | Do not cover the conversational quality of the real model |
 | Scripted end-to-end conversations | 9 full conversations with 9 fixture customers (es/pt): offers, recalculation, household income, age cap, decline reasons, incidents, injection, handoff | Rules NLU; smoke test, not a held-out evaluation |
 | NLU intent, first held-out set (29 es/pt phrases) | Rules 79%. Claude 93–97% (two runs) | Single annotator; small sample |
-| NLU intent, held-out set v2 (114 es/pt phrases) | Rules baseline 72% (95% CI 63–79%) | Claude run and second annotator in progress |
+| NLU intent, held-out set v2 (114 es/pt phrases) | Two annotators, Cohen's kappa 0.93; rules baseline 68% (95% CI 59–76%) on the adjudicated labels | Claude run pending (needs the API key) |
 | Live test with Claude Haiku 4.5 (13 turns) | 0 fallbacks to rules; ~1.1 s per call (p95 1.7 s); ~490 input and ~105 output tokens per turn | Small sample, not a benchmark |
 | Credit policy 0.4 in gold (Databricks), 150,000 customers | 50,707 eligible (33.8%); 24,953 with a proactive offer; no offer mainly because of missing income (30,033, recoverable in the chat) or a blocked product (25,519). The Python implementation matches gold on all 1.8 M options | Synthetic policy defined by the team; no external ground truth |
 | Data pipeline in Databricks (bronze → silver → gold) | Full job in ~14 min; 94 quality metrics per run; 0 key duplicates; update fixture: 5 of 5 cases correct | Static data: updates are shown with a labeled fixture, not real deliveries |

@@ -29,18 +29,23 @@ no false positives. The two model runs differ in one phrase: it is not determini
 
 `backend/eval/nlu_heldout_v2.py` (PR #26): 114 new team-made phrases (59 es, 55 pt; clear, colloquial, mixed and adversarial
 strata), written in one pass and committed **before** the first measurement, with a blind sheet for a second annotator
-(Cohen's kappa and adjudication: `backend/scripts/nlu_agreement.py`).
+(Cohen's kappa and adjudication: `backend/scripts/nlu_agreement.py`). A second team member labeled it blind
+(`backend/eval/annotation/nlu_heldout_v2_second.csv`, PR #32); the 11 disagreements were settled with the second
+annotator's labels, each with its reason, in `backend/eval/annotation/nlu_heldout_v2_adjudicated.csv`, which is the
+reference label set from now on.
 
 | Measurement | Result | Status |
 |---|---|---|
-| **Rules baseline, clean** (rules as of the commit that froze the set) | **82/114 = 72%** (95% Wilson CI 63–79%); es 73%, pt 71%; sensitive topic 9/13, 1 false positive | **This is the reference rules figure** |
+| Second annotator, agreement before adjudication | Intent 107/114 (94%), **Cohen's kappa 0.93**; sensitive topic 107/114, kappa 0.75 | Done |
+| **Rules baseline, clean, adjudicated labels** (rules as of the commit that froze the set, `69e49f2`) | **78/114 = 68%** (95% Wilson CI 59–76%); es 68%, pt 69%; sensitive topic 9/20, 1 false positive | **This is the reference rules figure** |
+| Rules baseline, clean, primary labels only | 82/114 = 72% (95% Wilson CI 63–79%); sensitive topic 9/13 | Superseded by the adjudicated labels |
 | Claude Haiku 4.5 | — | Pending (needs the API key; `--rescore` applies the final labels without calling the model again) |
-| Second annotator, kappa | — | Pending |
 
 **Contamination note.** After the clean measurement, the rules NLU was changed to fix behavior found in scripted demo
 conversations: language-specific word lists, charges the customer did not make as a sensitive topic, requests inside
 greetings, named products and words shared by both languages (commits `f62dbc0`, `ebde991`, `8775959`). Several of those
-phrasings also appear in v2, so **any new rules measurement on v2 is optimistic** and must not replace the 72%. A
+phrasings also appear in v2, so **any new rules measurement on v2 is optimistic** and must not replace the clean 68% (the current rules
+score 81/114 = 71% on the adjudicated labels, for reference only). A
 measurement with Claude on v2 is still clean (the prompt was not tuned on v2). Later rules changes need the affected
 phrases replaced or a new v3 set nobody has looked at.
 
