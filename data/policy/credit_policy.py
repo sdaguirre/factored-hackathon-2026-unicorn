@@ -109,21 +109,24 @@ def offer_options(profile: dict, policy: Policy) -> list[dict]:
     available = max(_num(profile.get("available_installment_usd")) or 0.0, 0.0)
     eligible = bool(profile.get("is_eligible"))
     adjustment = _num(profile.get("total_rate_adjustment_pp")) or 0.0
+    band = next((b for b in policy.bands if b["band"] == profile.get("risk_band")), {})
     out = []
     for g in policy.grid:
         product = g["option_code"].split("-")[0]
         cat = policy.catalog[product]
         if product == "CC":                     # cards: the tier credit limit range
             lo, hi, term_allowed = g["min_amount_usd"], g["max_amount_usd"], True
-        else:                                   # loans: whole product range, term up to the band maximum
+        else:                                   # loans: whole product range, term up to the band maximum capped by age
             lo, hi = cat["min_amount_usd"], cat["max_amount_usd"]
             max_term = _num(profile.get("max_term_personal_loan_months" if product == "PL" else "max_term_mortgage_months")) or 0
             term_allowed = g["term_months"] <= max_term
+            band_max = band.get("max_term_personal_loan_months" if product == "PL" else "max_term_mortgage_months", 0)
         rate = min(max(g["reference_rate_pct"] + adjustment, cat["min_rate_pct"]), cat["max_rate_pct"])
         by_capacity = max_principal(available, rate, g["term_months"])
         capped = math.floor(min(by_capacity, hi) / 100) * 100
         is_available = eligible and term_allowed and capped >= lo
         reason = None if is_available else ("customer_not_eligible" if not eligible
+                                            else "term_above_age_at_maturity" if not term_allowed and g["term_months"] <= band_max
                                             else "term_above_band_maximum" if not term_allowed
                                             else "capacity_below_option_minimum")
         installment = round(monthly_installment(capped, rate, g["term_months"]), 2) if is_available else None

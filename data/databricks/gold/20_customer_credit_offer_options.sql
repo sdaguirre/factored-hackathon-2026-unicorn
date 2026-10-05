@@ -38,11 +38,17 @@ priced AS (
             WHEN 'PL' THEN g.term_months <= p.max_term_personal_loan_months
             WHEN 'MG' THEN g.term_months <= p.max_term_mortgage_months
             ELSE true END                                 AS term_allowed,
+        -- the band alone would allow the term (to tell a band limit from the age-at-maturity cap)
+        CASE c.product_code
+            WHEN 'PL' THEN g.term_months <= b.max_term_personal_loan_months
+            WHEN 'MG' THEN g.term_months <= b.max_term_mortgage_months
+            ELSE true END                                 AS band_term_allowed,
         g.reference_rate_pct,
         least(greatest(g.reference_rate_pct + p.total_rate_adjustment_pp, c.min_rate_pct), c.max_rate_pct) AS offer_rate_pct
     FROM IDENTIFIER(:gold_schema || '.customer_credit_profile') p
     CROSS JOIN IDENTIFIER(:silver_schema || '.ref_term_grid') g
     JOIN catalog c ON c.product_code = split(g.product_code, '-')[0]
+    LEFT JOIN IDENTIFIER(:silver_schema || '.ref_policy_bands') b ON b.band = p.risk_band
 ),
 sized AS (
     SELECT
@@ -86,6 +92,7 @@ SELECT
     is_featured,
     offer_mode,
     CASE WHEN NOT is_eligible                              THEN 'customer_not_eligible'
+         WHEN NOT term_allowed AND coalesce(band_term_allowed, false) THEN 'term_above_age_at_maturity'
          WHEN NOT term_allowed                             THEN 'term_above_band_maximum'
          WHEN capped_amount_usd < option_min_amount_usd    THEN 'capacity_below_option_minimum' END AS unavailable_reason,
     CASE WHEN is_available THEN capped_amount_usd END                          AS offer_max_amount_usd,
@@ -121,7 +128,7 @@ ALTER TABLE IDENTIFIER(:gold_schema || '.customer_credit_offer_options') ALTER C
     is_available COMMENT 'Eligible customer, term allowed and capped amount >= option minimum',
     is_featured COMMENT 'Option to present first for the customer and product: cards the highest available tier, loans the highest amount, ties to the shortest term. At most one per customer and product',
     offer_mode COMMENT 'Customer offer mode copied from the profile (proactive, on_customer_interest, none)',
-    unavailable_reason COMMENT 'customer_not_eligible, term_above_band_maximum (band maximum or age-at-maturity cap) or capacity_below_option_minimum; null when available',
+    unavailable_reason COMMENT 'customer_not_eligible, term_above_band_maximum (the risk band does not allow the term), term_above_age_at_maturity (the band allows it but the loan would end after max_age_at_maturity_years) or capacity_below_option_minimum; null when available',
     offer_max_amount_usd COMMENT 'Largest amount offered: min(capacity amount, option maximum) rounded down to 100 USD; null when not available',
     offer_monthly_installment_usd COMMENT 'Monthly installment of offer_max_amount_usd, USD',
     local_currency COMMENT 'Currency shown to the customer',
