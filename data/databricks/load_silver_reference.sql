@@ -4,12 +4,17 @@
 -- All tables are synthetic: team-defined, derived from observed `products` data where
 -- possible (see data/reference/README.md and data/reference/derivation/). ref_card_tiers.csv is only a
 -- derivation input for derivation/07 and is not loaded: its result is already in ref_term_grid.
+-- Parameter :silver_schema (catalog.schema) selects where the ref_* tables are created
+-- (workspace.silver_latam_bank_test or workspace.silver_latam_bank); the CSVs are always read from
+-- the volume workspace.silver_latam_bank.reference.
 
 CREATE VOLUME IF NOT EXISTS workspace.silver_latam_bank.reference
 COMMENT 'Source CSVs for the synthetic reference tables (silver.ref_*). Source of truth: data/reference/ in the team repo.';
 
+CREATE SCHEMA IF NOT EXISTS IDENTIFIER(:silver_schema);
+
 -- ---------------------------------------------------------------------------------------------
-CREATE OR REPLACE TABLE workspace.silver_latam_bank.ref_product_catalog (
+CREATE OR REPLACE TABLE IDENTIFIER(:silver_schema || '.ref_product_catalog') (
     product_code         STRING     NOT NULL COMMENT 'Product family code: CC credit card, PL personal loan, MG mortgage',
     product_type         STRING     NOT NULL COMMENT 'English product type',
     source_product_type  STRING     NOT NULL COMMENT 'Raw product_type label in bronze products (Spanish); join key to map raw data',
@@ -25,7 +30,7 @@ CREATE OR REPLACE TABLE workspace.silver_latam_bank.ref_product_catalog (
 )
 COMMENT 'SYNTHETIC credit product catalog (credit card, personal loan, mortgage). Country-agnostic, amounts in USD. Stands in for a source product catalog the dataset lacks. Static: loaded from data/reference/ref_product_catalog.csv.';
 
-INSERT INTO workspace.silver_latam_bank.ref_product_catalog
+INSERT INTO IDENTIFIER(:silver_schema || '.ref_product_catalog')
 SELECT
     product_code,
     product_type,
@@ -46,7 +51,7 @@ FROM read_files(
 );
 
 -- ---------------------------------------------------------------------------------------------
-CREATE OR REPLACE TABLE workspace.silver_latam_bank.ref_term_grid (
+CREATE OR REPLACE TABLE IDENTIFIER(:silver_schema || '.ref_term_grid') (
     product_code        STRING  NOT NULL COMMENT 'PL, MG, or CC-<tier_code> for credit card tiers',
     product_type        STRING  NOT NULL COMMENT 'English product type',
     tier                STRING           COMMENT 'Credit card tier; null for loans',
@@ -62,7 +67,7 @@ CREATE OR REPLACE TABLE workspace.silver_latam_bank.ref_term_grid (
 )
 COMMENT 'SYNTHETIC reference rate and amount range per product and term (cards per tier). Country-agnostic, USD; local currency is computed at serving time. Derived once with data/reference/derivation/07_term_rate_amount_grid.sql from observed active products; static.';
 
-INSERT INTO workspace.silver_latam_bank.ref_term_grid
+INSERT INTO IDENTIFIER(:silver_schema || '.ref_term_grid')
 SELECT product_code, product_type, tier, term_months, term_years, reference_rate_pct,
        min_amount_usd, max_amount_usd, is_synthetic,
        '0.1', _metadata.file_path, current_timestamp()
@@ -76,7 +81,7 @@ FROM read_files(
 -- Credit policy parameters (policy_version 0.3). Read by the gold SQL and by the rules service,
 -- so both compute offers with the same values. See docs/CREDIT_RULES.md.
 -- =============================================================================================
-CREATE OR REPLACE TABLE workspace.silver_latam_bank.ref_policy_params (
+CREATE OR REPLACE TABLE IDENTIFIER(:silver_schema || '.ref_policy_params') (
     param_name     STRING  NOT NULL COMMENT 'Parameter name',
     param_value    STRING  NOT NULL COMMENT 'Parameter value as text; cast by the consumer according to unit',
     unit           STRING           COMMENT 'Unit or type of the value',
@@ -88,7 +93,7 @@ CREATE OR REPLACE TABLE workspace.silver_latam_bank.ref_policy_params (
 )
 COMMENT 'SYNTHETIC scalar credit policy parameters: 20% debt-to-income hard limit, hard-filter thresholds, cutoff date. Static: loaded from data/reference/ref_policy_params.csv.';
 
-INSERT INTO workspace.silver_latam_bank.ref_policy_params
+INSERT INTO IDENTIFIER(:silver_schema || '.ref_policy_params')
 SELECT param_name, param_value, unit, description, is_synthetic,
        '0.3', _metadata.file_path, current_timestamp()
 FROM read_files(
@@ -98,7 +103,7 @@ FROM read_files(
 );
 
 -- ---------------------------------------------------------------------------------------------
-CREATE OR REPLACE TABLE workspace.silver_latam_bank.ref_policy_bands (
+CREATE OR REPLACE TABLE IDENTIFIER(:silver_schema || '.ref_policy_bands') (
     band               STRING  NOT NULL COMMENT 'Risk band A (best) to E',
     min_credit_score   INT     NOT NULL COMMENT 'Minimum credit_score for the band (score fallback until the risk model exists)',
     rate_adjustment_pp DOUBLE  NOT NULL COMMENT 'Percentage points added to the reference rate',
@@ -112,7 +117,7 @@ CREATE OR REPLACE TABLE workspace.silver_latam_bank.ref_policy_bands (
 )
 COMMENT 'SYNTHETIC risk bands by credit_score: eligibility (band E has no offer), rate adjustment and maximum loan terms (risk limits the term, not the amount). Static: loaded from data/reference/ref_policy_bands.csv.';
 
-INSERT INTO workspace.silver_latam_bank.ref_policy_bands
+INSERT INTO IDENTIFIER(:silver_schema || '.ref_policy_bands')
 SELECT band, min_credit_score, rate_adjustment_pp, offer_allowed,
        max_term_personal_loan_months, max_term_mortgage_months, is_synthetic,
        '0.3', _metadata.file_path, current_timestamp()
@@ -123,7 +128,7 @@ FROM read_files(
 );
 
 -- ---------------------------------------------------------------------------------------------
-CREATE OR REPLACE TABLE workspace.silver_latam_bank.ref_segment_adjustments (
+CREATE OR REPLACE TABLE IDENTIFIER(:silver_schema || '.ref_segment_adjustments') (
     segment            STRING  NOT NULL COMMENT 'Customer segment as in customers.segment',
     rate_adjustment_pp DOUBLE  NOT NULL COMMENT 'Percentage points added to the reference rate',
     is_synthetic       BOOLEAN NOT NULL COMMENT 'Always true: team-defined policy',
@@ -133,7 +138,7 @@ CREATE OR REPLACE TABLE workspace.silver_latam_bank.ref_segment_adjustments (
 )
 COMMENT 'SYNTHETIC rate adjustment by customer segment. Static: loaded from data/reference/ref_segment_adjustments.csv.';
 
-INSERT INTO workspace.silver_latam_bank.ref_segment_adjustments
+INSERT INTO IDENTIFIER(:silver_schema || '.ref_segment_adjustments')
 SELECT segment, rate_adjustment_pp, is_synthetic,
        '0.3', _metadata.file_path, current_timestamp()
 FROM read_files(
