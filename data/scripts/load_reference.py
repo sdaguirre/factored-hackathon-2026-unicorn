@@ -49,13 +49,15 @@ def main(args):
     w = WorkspaceClient(profile=args.profile)
     params = [StatementParameterListItem(name="silver_schema", value=args.silver_schema)]
     stmts = list(statements(SQL_FILE.read_text(encoding="utf-8")))
-    # the first statement creates the volume, which must exist before uploading
-    run(w, args.warehouse_id, stmts[0])
+    # the statements up to CREATE VOLUME (its schema, then the volume) must run before uploading
+    setup = next(i for i, s in enumerate(stmts) if s.startswith("CREATE VOLUME")) + 1
+    for s in stmts[:setup]:
+        run(w, args.warehouse_id, s)
     for name in FILES:
         with open(ROOT / "data" / "reference" / name, "rb") as f:
             w.files.upload(f"{VOLUME_PATH}/{name}", f, overwrite=True)
         print(f"uploaded {name}")
-    for s in stmts[1:]:
+    for s in stmts[setup:]:
         run(w, args.warehouse_id, s, params)
         print("ok:", s.splitlines()[0][:90])
     for name in FILES:
