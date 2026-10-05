@@ -24,6 +24,17 @@ from eval.nlu_heldout_v2 import HELDOUT_V2  # noqa: E402
 OUT = ROOT / "eval" / "annotation"
 
 
+def read_sheet(path: str) -> list[dict]:
+    """Rows of an annotation CSV as saved by Excel or Google Sheets: optional BOM, ',' or ';' as separator."""
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        text = f.read()
+    try:
+        dialect = csv.Sniffer().sniff(text.splitlines()[0], delimiters=",;\t")
+    except csv.Error:
+        dialect = csv.excel
+    return list(csv.DictReader(text.splitlines(), dialect=dialect))
+
+
 def kappa(a: list, b: list) -> float:
     n = len(a)
     po = sum(x == y for x, y in zip(a, b)) / n
@@ -44,8 +55,7 @@ def blind():
 
 
 def compare(filled: str):
-    with open(filled, encoding="utf-8-sig", newline="") as f:
-        second = {int(r["id"]): r for r in csv.DictReader(f)}
+    second = {int(r["id"]): r for r in read_sheet(filled)}
     missing = [i for i in range(1, len(HELDOUT_V2) + 1) if not second.get(i, {}).get("intent", "").strip()]
     if missing:
         sys.exit(f"{len(missing)} phrases without an intent, e.g. ids {missing[:10]}")

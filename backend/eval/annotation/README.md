@@ -3,7 +3,8 @@
 `nlu_heldout_v2_blind.csv` has the 114 phrases of `eval/nlu_heldout_v2.py` without labels. Fill `intent` and
 `sensitive_topic` (true/false) for every row **without opening `eval/nlu_heldout_v2.py`** and without running any
 classifier. When `yes_no_pending` is true, the bot has just asked a yes/no question and the phrase answers it.
-Save the filled copy as `nlu_heldout_v2_second.csv` and run:
+Filling it in Excel or Google Sheets both work (the scripts accept `,` or `;` as separator and a UTF-8 BOM). Save the
+filled copy as `nlu_heldout_v2_second.csv` and run:
 
 ```bash
 cd backend

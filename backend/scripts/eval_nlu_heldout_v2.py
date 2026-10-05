@@ -18,7 +18,6 @@ Measure once: never tune prompts or rules on this set.
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import math
 import statistics
@@ -33,7 +32,8 @@ sys.path.insert(0, str(ROOT))
 
 from app.agent.nlu import MockNLU, NLUResult  # noqa: E402
 from app.agent.orchestrator import validate_nlu  # noqa: E402
-from eval.nlu_heldout_v2 import HELDOUT_V2  # noqa: E402
+from eval.nlu_heldout_v2 import HELDOUT_V2, SEEN_IN_PROMPT  # noqa: E402
+from scripts.nlu_agreement import read_sheet  # noqa: E402
 
 
 def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
@@ -54,8 +54,7 @@ def load_cases(labels: str | None) -> list[tuple]:
     """Primary labels from the set, or adjudicated labels (CSV with id, intent, sensitive_topic) when given."""
     if not labels:
         return HELDOUT_V2
-    with open(labels, encoding="utf-8", newline="") as f:
-        adj = {int(r["id"]): r for r in csv.DictReader(f)}
+    adj = {int(r["id"]): r for r in read_sheet(labels)}
     return [(t, adj[i]["intent"], lang, adj[i]["sensitive_topic"].strip().lower() == "true", pend, stratum)
             for i, (t, _, lang, _, pend, stratum) in enumerate(HELDOUT_V2, start=1)]
 
@@ -71,12 +70,13 @@ def predict_all(predict, cases) -> list[dict]:
         except Exception as e:  # noqa: BLE001 - an invalid model output counts as an error, as in production
             r, error = NLUResult(intent="unknown"), type(e).__name__
         r = validate_nlu(r, text)          # explicit handoff guard, as in production
-        out.append({"intent": r.intent, "sensitive_topic": bool(r.sensitive_topic), "error": error})
+        out.append({"intent": r.intent, "sensitive_topic": bool(r.sensitive_topic), "language": r.language,
+                    "error": error})
     return out
 
 
 def score(name: str, preds: list[dict], cases) -> dict:
-    hits, failures = [], 0
+    hits, failures, lang_hits, unseen_hits = [], 0, [], []
     by_lang, by_stratum, by_intent = defaultdict(list), defaultdict(list), defaultdict(list)
     sens = {"tp": 0, "fn": 0, "fp": 0}
     misses = []
@@ -84,6 +84,9 @@ def score(name: str, preds: list[dict], cases) -> dict:
         failures += pr["error"] is not None
         hit = pr["intent"] == intent
         hits.append(hit)
+        lang_hits.append(pr.get("language") == lang)
+        if text not in SEEN_IN_PROMPT:
+            unseen_hits.append(hit)
         by_lang[lang].append(hit)
         by_stratum[stratum].append(hit)
         by_intent[intent].append(hit)
@@ -98,11 +101,18 @@ def score(name: str, preds: list[dict], cases) -> dict:
     print("   by language: " + " | ".join(f"{g} {pct(sum(v), len(v))}" for g, v in sorted(by_lang.items())))
     print("   by stratum:  " + " | ".join(f"{g} {sum(v)}/{len(v)}" for g, v in sorted(by_stratum.items())))
     print("   by intent:   " + ", ".join(f"{g} {sum(v)}/{len(v)}" for g, v in sorted(by_intent.items())))
+    print("   (per-stratum and per-intent counts are indicative only: 2 to 17 phrases each)")
+    print(f"   without the {n - len(unseen_hits)} phrases seen in the prompt: {pct(sum(unseen_hits), len(unseen_hits))}")
+    if any("language" in p for p in preds):
+        print(f"   language detected: {pct(sum(lang_hits), n)}")
     print(f"   sensitive topic: detected {sens['tp']}/{sens['tp'] + sens['fn']}, false positives {sens['fp']}"
           f" | invalid outputs: {failures}")
     for t, exp, got in misses:
         print(f"   x '{t}' -> {got} (expected {exp})")
     return {"name": name, "n": n, "correct": k, "accuracy": k / n, "wilson_95": wilson(k, n),
+            "unseen_in_prompt": [sum(unseen_hits), len(unseen_hits)],
+            "language_correct": [sum(lang_hits), n] if any("language" in p for p in preds) else None,
+            "breakdowns_note": "per-stratum and per-intent counts are indicative only (2 to 17 phrases each)",
             "by_language": {g: [sum(v), len(v)] for g, v in by_lang.items()},
             "by_stratum": {g: [sum(v), len(v)] for g, v in by_stratum.items()},
             "by_intent": {g: [sum(v), len(v)] for g, v in by_intent.items()},
