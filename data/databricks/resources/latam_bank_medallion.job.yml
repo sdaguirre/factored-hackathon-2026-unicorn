@@ -25,14 +25,39 @@ resources:
         # hackathon data). With live data set the default to "{{job.start_time.iso_date}}".
         - name: as_of_date
           default: ""
+        - name: s3_bucket
+          default: ${var.s3_bucket}
       # Daily, as in production. The hackathon data is static, so it stays paused: run it by hand.
       schedule:
         quartz_cron_expression: "0 0 6 * * ?"
         timezone_id: America/Bogota
         pause_status: PAUSED
+      environments:
+        - environment_key: serverless_default
+          spec:
+            environment_version: "2"
+            dependencies:
+              - pyyaml
+              - boto3
       tasks:
+        # ---------------------------------------------------------------- s3_copy
+        - task_key: s3_copy
+          timeout_seconds: 3600
+          max_retries: 1
+          min_retry_interval_millis: 60000
+          environment_key: serverless_default
+          spark_python_task:
+            python_file: ../src/run_s3_copy.py
+            parameters:
+              - "--config"
+              - "${workspace.root_path}/files/configs/s3_sources.yml"
+              - "--bucket"
+              - "{{job.parameters.s3_bucket}}"
+
         # ---------------------------------------------------------------- bronze
         - task_key: bronze_load
+          depends_on:
+            - task_key: s3_copy
           timeout_seconds: 3600
           max_retries: 1
           min_retry_interval_millis: 60000
