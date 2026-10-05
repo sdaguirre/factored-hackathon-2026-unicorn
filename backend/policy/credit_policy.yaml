@@ -2,7 +2,7 @@
 # Definida por el equipo para el hackathon. No es una politica bancaria real.
 # Los valores son parametros de partida; el equipo puede cambiarlos sin tocar el codigo.
 # La conversacion (LLM) NO decide ni inventa reglas: solo el motor determinista aplica este archivo.
-version: "0.1.0-provisional"
+version: "0.2.0-provisional"
 synthetic: true
 
 # Tope de endeudamiento: cuota total (existente + nueva) sobre ingreso mensual.
@@ -59,3 +59,11 @@ declared_income:
 
 # Atributos que NO pueden usarse en la decision (solo auditoria de equidad)
 protected_attributes: [gender, marital_status, education_level, detected_accent, date_of_birth]
+
+# Documentos para avanzar con una solicitud (lista SINTETICA del equipo). Lo que el banco ya tiene del cliente no se vuelve a
+# pedir. El chat no recibe archivos: el cliente confirma que cuenta con ellos y un asesor los verifica.
+required_documents:
+  personal_loan: [id_copy, address_proof, income_proof]
+  mortgage: [id_copy, address_proof, income_proof, property_deed, appraisal]
+  # Si el ingreso lo declaro el cliente en el chat (no verificado) se exige ademas:
+  if_income_declared: [bank_statements_3m]

@@ -42,6 +42,11 @@ responde, `/v1/handoffs` devuelve 404, un documento inexistente recibe 3 pregunt
 documento de prueba se autentica y se recibe una respuesta. `--doc` necesita que los datos de ese cliente estén en la
 máquina donde se ejecuta el script.
 
+## Bandeja de correos simulados
+
+Los resúmenes quedan en `CHAT_OUTBOX_DIR` (PDF + JSON `simulated_not_sent`) dentro del contenedor, que es efímero. No se envía
+ningún correo real.
+
 ## Durante la evaluación
 
 | Qué | Cómo |

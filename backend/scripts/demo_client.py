@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 import urllib.error
 import urllib.request
@@ -20,8 +19,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from app.core.fmt import fmt_date, fmt_money, fmt_month_year  # noqa: E402
-
+from app.auth import kba  # noqa: E402
 from app.config import Settings  # noqa: E402
 
 SNAP = Settings(_env_file=None).data_dir      # snapshot local o, si no existe, el conjunto de ejemplo del equipo
@@ -44,27 +42,34 @@ class Owner:
 
     def __init__(self, document: str):
         cu = pd.read_parquet(SNAP / "customers.parquet")
-        self.cid = cu[cu.document_number.astype(str) == str(document)].customer_id.iloc[0]
+        row = cu[cu.document_number.astype(str) == str(document)].iloc[0]
+        self.cid = row.customer_id
+        self.occupation, self.registration = row.get("occupation"), row.get("registration_date")
         self.products = pd.read_parquet(SNAP / "products.parquet").query("customer_id == @self.cid")
-        self.tx = pd.read_parquet(SNAP / "transactions.parquet").query("customer_id == @self.cid")
         br = pd.read_parquet(SNAP / "branches.parquet")
         self.city = dict(zip(br.branch_id, br.city))
 
+    def _product(self, text: str, lang: str) -> pd.Series:
+        """El producto al que apunta el enunciado: su tipo y, si dice 'mas antiguo', el de apertura mas temprana."""
+        norm = text.lower()
+        for ptype, label in kba.PRODUCT_LABELS[lang].items():
+            if label in norm:
+                group = self.products[self.products.product_type == ptype].sort_values("opening_date")
+                if group.empty:
+                    raise ValueError(f"no tiene {label}")
+                return group.iloc[0]          # el unico de su tipo o el mas antiguo (el reto solo lo pregunta si no hay empate)
+        raise ValueError(f"producto no reconocido en: {text}")
+
     def answer(self, q: dict, lang: str) -> str:
         text, labels = q["text"], {o["label"]: o["id"] for o in q["options"]}
-        m = re.search(r"(?:terminación|final) (\d{4})", text)
-        d = re.search(r"(\d{2}/\d{2}/\d{4})", text)
+        if "ocupa" in text:
+            return labels[kba.OCCUPATIONS[lang][self.occupation]]
+        if "cliente" in text and ("hizo" in text or "tornou" in text):
+            return labels[str(pd.Timestamp(self.registration).year)]
+        p = self._product(text, lang)
         if "ciudad" in text or "cidade" in text:
-            if m:  # apertura de producto
-                p = self.products[self.products.last4 == m.group(1)].iloc[0]
-                return labels[self.city[p.opening_branch_id]]
-            t = self.tx[self.tx.transaction_date.dt.strftime("%d/%m/%Y") == d.group(1)].iloc[0]
-            return labels[t.transaction_city]
-        if "mes" in text or "mês" in text:
-            p = self.products[self.products.last4 == m.group(1)].iloc[0]
-            return labels[fmt_month_year(pd.Timestamp(p.opening_date).replace(day=1), lang)]
-        t = self.tx[self.tx.transaction_date.dt.strftime("%d/%m/%Y") == d.group(1)].iloc[0]
-        return labels[fmt_money(float(t.amount), t.currency)]
+            return labels[self.city[p.opening_branch_id]]
+        return labels[str(pd.Timestamp(p.opening_date).year)]
 
 
 def main() -> None:

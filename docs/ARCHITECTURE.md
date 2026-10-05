@@ -29,19 +29,38 @@ Cliente ─► Interfaz (nginx) ─► /v1 ─► API FastAPI ─► Orquestador
 El nginx de la interfaz sirve la página y reenvía `/v1` al backend agregando la clave de integración en el servidor; el
 puerto del backend no se publica y `/v1/handoffs` (cola de la consola del agente) se bloquea en el proxy.
 
+## Conversación de crédito: moneda, solicitud y cierre
+
+El orquestador sigue siendo una máquina de estados (`awaiting`: `offer_interest`, `amount`, `income`, `proceed`, `docs_all`,
+`doc_item`). La moneda se detecta y convierte en código (`money.py`); los documentos pendientes salen de la política y de
+`docs_on_file` (`documents.py`); el cierre (`/end`) arma el resumen y deja el PDF en una bandeja simulada (`core/outbox.py`,
+`core/pdf.py`). El LLM solo clasifica y redacta mensajes de bajo riesgo; la identidad (¿eres un robot?) se responde con
+plantilla y cualquier texto que afirme ser humano se descarta.
+
 ## Autenticación
 
-Tres preguntas de seguridad de opción única generadas desde los datos del cliente (ciudad o mes y año de apertura de un
-producto; ciudad o monto de un movimiento reciente). Se exigen todas correctas; 3 fallos bloquean el documento 15 minutos;
-un documento inexistente recibe un reto señuelo con la misma forma. Límite conocido: adivinar acierta 1 de 64 veces por
-intento. Detalle en `backend/README.md`.
+Tres preguntas de seguridad de opción única generadas desde los datos del cliente: ocupación registrada, ciudad donde
+abrió un producto (solo si fue en sucursal), año de apertura de un producto y año en que se hizo cliente. Sin montos ni
+fechas exactas; los distractores salen siempre del mismo universo (mismo país, años válidos) y el enunciado no lleva datos
+reales como terminaciones. Se exigen todas correctas; 3 fallos bloquean el documento 15 minutos; un documento inexistente
+recibe un reto señuelo con la misma forma. Límite conocido: adivinar acierta 1 de 64 veces por intento. Detalle, cobertura
+medida y límites en `backend/README.md`.
 
 ## Oferta proactiva
 
-Al cerrar la conversación o tras atender otro tema se ofrece un préstamo personal indicativo **solo si** el cliente acepta
-marketing, está preaprobado con datos del banco (no con ingreso declarado en el chat), no hubo sentimiento negativo ni
-tema delicado, no se le rechazó una solicitud y no se ofreció ya. Quien pide un crédito se evalúa **sin** mirar el
+Al cerrar la conversación se ofrece un préstamo personal indicativo **solo si** el cliente acepta marketing, está
+preaprobado con datos del banco (no con ingreso declarado en el chat), no hubo sentimiento negativo ni tema delicado, no
+se le rechazó una solicitud, no se ofreció ya y **no le queda nada pendiente** (ni un tema de soporte en la sesión, ni un
+caso crítico abierto, ni uno abierto en los últimos 180 días). Quien pide un crédito se evalúa **sin** mirar el
 consentimiento de marketing: ese consentimiento solo gobierna lo proactivo.
+
+## Soporte y contexto del cliente
+
+El agente atiende primero lo que el cliente trae. Al autenticar lee, una vez, sus casos abiertos y la existencia de sus
+productos (lista blanca de campos: nunca saldos, movimientos ni montos). Responde con datos verificados (que un producto
+existe, categoría, fecha y estado de un caso), anota lo que el cliente cuenta como declarado y ofrece conectar con un
+asesor; no deriva solo. El resumen para el asesor lleva ese contexto, el ánimo, una prioridad y una ruta sugeridas.
+Detalle y límites en `backend/README.md`.
 
 ## Idioma
 

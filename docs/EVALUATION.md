@@ -42,7 +42,13 @@ Fallos hallados en esa prueba y corregidos:
    Ahora el modelo solo reescribe mensajes de bajo riesgo; decisiones, ofertas, derivaciones y avisos salen de plantillas revisadas.
 3. Tasas en portugués mal enrutadas (ver sección 1).
 
-## 3. Pruebas de fallos y seguridad (96 pruebas automáticas, sin red)
+Segunda corrida en vivo tras los flujos de moneda, solicitud, resumen e identidad (`e2e_llm.py`, 6 conversaciones): ~1,0 s
+mediana y ~1,4 s p95 por llamada, ≈ 979 tokens de entrada y ≈ 93 de salida por turno (más que antes: el historial y los
+nuevos prompts). Se probaron frases de identidad; la reescritura del modelo se restringió porque en saludos y rechazos
+empeoraba el texto de las plantillas. El conjunto de desarrollo del NLU creció 5 casos de `ask_identity` (65/65 con Claude,
+~98% con reglas, optimista porque se desarrolló sobre esos casos); el conjunto reservado no se tocó.
+
+## 3. Pruebas de fallos y seguridad (155 pruebas automáticas, sin red)
 
 | Escenario del reto | Cobertura |
 |---|---|
@@ -52,6 +58,9 @@ Fallos hallados en esa prueba y corregidos:
 | Inyección de instrucciones | El texto del cliente es dato: intento de forzar una aprobación no la produce (con LLM falso y con reglas; una frase real se probó con el modelo en vivo) |
 | Falla del LLM | Cae a reglas sin romper el turno; el LLM falso que se equivoca a propósito no logra derivar, ni reescribir decisiones, ni introducir cifras |
 | Ambigüedad multilingüe | Español, portugués, formatos numéricos locales (1.500,00 y 1,500.00) |
+| Moneda | Detección, conversión con tasa del dataset, equivalentes con la misma tasa, monedas no soportadas |
+| Solicitud y documentos | Solo se piden los que faltan; derivación con todo en orden; aviso si falta algo; sin resumen en incidentes |
+| Identidad | Responde con la verdad a «¿eres un robot?»; un texto del modelo que diga ser persona se descarta |
 | Consentimiento y momento de la oferta proactiva | Sin consentimiento, con tema sensible, con sentimiento negativo, tras un rechazo, o ya ofrecida: no se ofrece |
 
 **No cubierto:** fallos de herramientas distintos de la caída del LLM (no hay herramientas externas reales: los datos son
