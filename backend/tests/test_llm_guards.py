@@ -54,7 +54,7 @@ def test_llm_cannot_rewrite_credit_decisions_or_offers(client, state):
                                    months=months), rewrite="Su crédito está aprobado sin condiciones, sin verificación.")
     state.orchestrator.llm = llm
     r = say(client, sid, h, f"quiero un préstamo de {int(amount)} a {months} meses")
-    assert r["outcome"] == "eligible" and "aprobado sin condiciones" not in r["reply"] and "simulación" in r["reply"]
+    assert r["outcome"] == "eligible" and "aprobado sin condiciones" not in r["reply"] and r["disclaimer"] == "simulation"
     assert llm.compose_calls == []                                           # ni se le pidio reescribir una decision
     # Con una propuesta ya evaluada, al despedirse llega el RESUMEN de esa propuesta (plantilla), no una oferta nueva
     state.orchestrator.llm = MisbehavingLLM(NLUResult(intent="closing"), rewrite="Hasta pronto.")

@@ -127,7 +127,7 @@ def test_eligible_path_in_spanish_with_local_number_format(client, state):
     r = say(client, sid, h, f"quiero un préstamo de {text} a {months} meses")
     assert r["intent"] == "credit_eligibility"
     assert r["outcome"] == "eligible" and r["language"] == "es"
-    assert "simulación" in r["reply"] and str(months) in r["reply"]
+    assert r["disclaimer"] == "simulation" and "simulación" not in r["reply"] and str(months) in r["reply"]
 
 
 def test_dti_exceeded_then_declared_income_recalculates_as_provisional(client, state):

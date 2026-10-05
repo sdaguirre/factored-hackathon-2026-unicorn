@@ -91,7 +91,7 @@ def test_handoff_is_reported_as_a_step_with_its_ticket(client, state, eligible):
 
 def test_a_failed_tool_leaves_no_verification_seals(client, state, eligible):
     sid, h = login(client, state, eligible[0])
-    state.repo._fx.clear()
+    state.repo._fx_usd.clear()
     r = say(client, sid, h, "quiero un préstamo de 1000 dólares")
     failed = [s for s in r["evidence"]["steps"] if s["status"] == "failed"]
     assert failed and failed[0]["id"] == "fx_rates"

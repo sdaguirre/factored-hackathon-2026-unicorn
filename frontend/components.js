@@ -85,6 +85,17 @@
     return a;
   };
 
+  // Aviso de simulacion: encabeza las ofertas y cierra el resumen de la oferta final (campo `disclaimer` del backend).
+  UNI.disclaimer = function (kind) {
+    var box = el("div", "disclaimer disclaimer-" + kind);
+    box.setAttribute("role", "note");
+    box.appendChild(el("span", "disclaimer-icon")).appendChild(icon(kind === "final" ? "shield" : "alert"));
+    append(box, [append(el("div", "disclaimer-body"), [
+      el("strong", "disclaimer-title", t("simNotice." + kind + "Title")),
+      el("span", "disclaimer-text", t("simNotice." + kind + "Text"))])]);
+    return box;
+  };
+
   // Sello de estado: tone = ok | warn | info | error
   UNI.statusBadge = function (tone, text, iconName) {
     return append(el("span", "sbadge sbadge-" + tone), [iconName ? icon(iconName, "icon-sm") : null, el("span", null, text)]);
@@ -228,7 +239,9 @@
     if (opts.offer) tags.appendChild(UNI.statusBadge("ok", t("offer"), "spark"));
     if (opts.uncertain) tags.appendChild(UNI.statusBadge("warn", t("uncertain"), "headset"));
     if (tags.childNodes.length) card.appendChild(tags);
+    if (opts.disclaimer === "simulation") card.appendChild(UNI.disclaimer("simulation"));
     card.appendChild(el("p", "msg-text", text));
+    if (opts.disclaimer === "final") card.appendChild(UNI.disclaimer("final"));
     var extras = el("div", "msg-extras");
     card.appendChild(extras);
     row.appendChild(card);

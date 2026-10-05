@@ -350,6 +350,20 @@ label { display: block; font-weight: 600; margin-bottom: 6px; }
 }
 .msg-agent .msg-card::before { content: ""; position: absolute; inset: 0 18px auto; height: 1px; background: linear-gradient(90deg, var(--accent), var(--cyan), transparent); opacity: 0.8; }
 .msg-agent .msg-text { font-size: 15.5px; }
+
+/* Aviso de simulacion: banda propia dentro de la tarjeta, arriba de una oferta y abajo del resumen final */
+.disclaimer {
+  display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid rgba(251, 191, 36, 0.36); border-left: 3px solid var(--warn); background: var(--warn-soft);
+}
+.disclaimer-simulation { margin-bottom: 10px; }
+.disclaimer-final { margin-top: 12px; border-color: rgba(196, 181, 253, 0.4); border-left-color: var(--accent); background: var(--accent-soft); }
+.disclaimer-icon { flex: none; display: inline-flex; color: var(--warn); padding-top: 1px; }
+.disclaimer-final .disclaimer-icon { color: var(--accent-ink); }
+.disclaimer-body { display: grid; gap: 2px; min-width: 0; }
+.disclaimer-title { font-size: 12.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--warn); }
+.disclaimer-final .disclaimer-title { color: var(--accent-ink); }
+.disclaimer-text { font-size: 13.5px; line-height: 1.45; color: var(--text-2); }
 .msg-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
 .msg-author { font-size: 11.5px; font-weight: 800; letter-spacing: 0.14em; color: var(--accent-ink); }
 .msg-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }

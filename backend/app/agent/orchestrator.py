@@ -19,7 +19,7 @@ from app.agent.handoff import build_summary
 from app.agent.language import norm, parse_amounts, parse_months
 from app.agent.llm import LLM, MockLLM
 from app.agent.nlu import HUMAN_REQUEST, NLUResult
-from app.agent.tools import (HandoffQueue, ToolContext, accept_offer, get_customer_context, get_offers, get_profile,
+from app.agent.tools import (HandoffQueue, ToolContext, accept_offer, get_offers, get_profile,
                              new_ticket_id, recalculate_offer, to_local, utc_iso)
 from app.core.fmt import fmt_money, fmt_pct
 from app.core.offers import OfferStore
@@ -41,7 +41,9 @@ DEFAULT_REWRITE_KINDS = frozenset({"thanks", "closing", "goodbye", "unknown", "a
 EMPATHY_EVERY_N_TURNS = 3
 CONCLUSIVE_OK = (eng.ELIGIBLE, eng.ELIGIBLE_PROVISIONAL)
 # "no paga ninguna" a la pregunta de las cuotas de la persona del hogar = 0
-_NO_DEBT = re.compile(r"\b(ningun[ao]?|nada|nenhum[a]?|zero|cero)\b")
+_INSTALLMENTS = re.compile(r"\b(cuotas?|paga|pago|debe|deudas?|parcelas?|deve|dividas?)\b")
+_NO_DEBT = re.compile(r"\b(ningun[ao]?|nada|nenhum[a]?|zero|cero|no paga|nao paga|sin cuotas|sem parcelas|"
+                      r"no tiene cuotas|nao tem parcelas)\b")
 # Otra persona del hogar en la respuesta ("mi esposa gana..."). Sin ella, "gano X" es el ingreso del propio cliente.
 _THIRD_PARTY = re.compile(r"\b(espos[oa]|marido|mujer|pareja|novi[oa]|companheir[oa]|conyuge|hij[oa]|filh[oa]|herman[oa]|"
                           r"irma[o]?|madre|padre|mae|pai|mama|papa|suegr[oa]|sogr[oa]|ella|ele|essa pessoa|esa persona|"
@@ -62,6 +64,7 @@ class ChatReply:
     summary_ready: bool = False          # la respuesta incluye el resumen final de la propuesta
     email: dict | None = None            # correo con el PDF (SIMULADO en el prototipo): {to, status, id}
     evidence: dict | None = None         # lo que el agente hizo de verdad en el turno (agent/evidence.py); None si no uso herramientas
+    disclaimer: str | None = None        # "simulation" (la respuesta presenta una oferta) | "final" (resumen de la oferta final)
 
 
 def _conv_dict(c: money.Conversion) -> dict:
@@ -115,6 +118,26 @@ def validate_nlu(nlu: NLUResult, message: str) -> NLUResult:
         upd["intent"] = "other_topic" if nlu.sensitive_topic else "unknown"
     return nlu.model_copy(update=upd) if upd else nlu
 
+
+
+# Respuestas que presentan cifras de una oferta: la interfaz las encabeza con el aviso de simulacion.
+OFFER_KINDS = frozenset({"offers", "offers_declared", "offer_featured", "offer_featured_card", "offer_proactive", "offer_proactive_card",
+                         "eligible", "eligible_card", "eligible_provisional", "eligible_card_provisional"})
+
+
+def disclaimer_for(facts: dict) -> str | None:
+    if facts.get("summary"):
+        return "final"
+    if facts.get("proactive_offer") or facts["kind"] in OFFER_KINDS or facts.get("kind2") in OFFER_KINDS:
+        return "simulation"
+    return None
+
+
+def fmt_dti(share: float) -> str:
+    """Debt-to-income truncated to one decimal: an offer at the limit (19.99%) must not read as 20.0%."""
+    import math
+
+    return fmt_pct(math.floor(share * 1000) / 10)
 
 class Orchestrator:
     def __init__(self, repo, policy: eng.Policy, rules: dict, llm: LLM, queue: HandoffQueue,
@@ -179,11 +202,6 @@ class Orchestrator:
             return self._facts("currency_unsupported", intent, awaiting=awaiting, ccy=mention.unsupported,
                                supported=", ".join(money.SUPPORTED))
 
-        if awaiting == "case_intro":                              # abrimos con un caso pendiente: "¿quiere que le cuente?"
-            if intent == "confirm_yes":
-                return self._support_case_status(session, ctx, intent, "")     # el "si" no es un dato del caso: no se anota
-            if intent == "confirm_no":
-                return self._facts("case_skip", intent, suggest="start")
         if awaiting == "confirm_handoff":
             # Ya no se encadena una oferta de credito tras atender otro tema: el cliente vino por otra cosa.
             if intent == "confirm_yes":
@@ -221,7 +239,7 @@ class Orchestrator:
             reply = self._docs_answer(session, ctx, awaiting, intent)
             if reply is not None:
                 return reply
-        if awaiting == "amount" and amounts and intent in ("unknown", "credit_eligibility", "confirm_yes"):
+        if awaiting == "amount" and amounts and intent in ("unknown", "credit_eligibility", "confirm_yes", "credit_offers"):
             nlu = nlu.model_copy(update={"intent": "credit_eligibility", "amount": amounts[0]})
             intent = "credit_eligibility"
         elif awaiting == "amount" and intent == "confirm_yes" and session.slots.get("pending_request", {}).get("featured_amount"):
@@ -231,6 +249,21 @@ class Orchestrator:
         if awaiting == "income" and amounts and intent in ("unknown", "update_income"):
             nlu = nlu.model_copy(update={"intent": "update_income", "declared_income": amounts[0]})
             intent = "update_income"
+        elif awaiting == "income" and intent in ("unknown", "confirm_yes") and session.slots.get("reasked") != "income":
+            session.slots.update(reasked="income", awaiting="income")      # una sola vez: despues sigue el flujo general
+            facts = self._facts("ask_income", intent, awaiting="income", ccy=get_profile(ctx)["local_currency"])
+            facts["pre"] = ["reask_number"]
+            return facts
+
+        pending = session.slots.get("pending_request") or {}
+        months_only = parse_months(message) or nlu.months
+        if intent == "unknown" and months_only and pending.get("product"):
+            pending.update(months=months_only, amount=None, conv=None)    # otro plazo: la oferta mas alta a ese plazo
+            session.slots["pending_request"] = pending
+            return self._evaluate(session, ctx, "credit_eligibility")
+        # 2. a "no" with no question pending (after seeing offers, for example): acknowledge, do not say "I did not understand"
+        if intent == "confirm_no" and not awaiting:
+            return self._facts("no_thanks", intent, suggest="start")
 
         session.unknown_streak = session.unknown_streak + 1 if intent == "unknown" else 0
 
@@ -288,23 +321,13 @@ class Orchestrator:
         return self._facts(kind, intent, awaiting="confirm_handoff", suggest="yes_no", **fmt)
 
     def _support_account(self, session: Session, ctx: ToolContext, intent: str, message: str) -> dict:
-        """'¿Tengo una tarjeta?', 'mi saldo': confirma que el producto existe (tipo y terminacion) y deriva el detalle."""
-        context = get_customer_context(ctx)
-        session.slots["context"] = context
-        family, hint = support.mentioned_family(message)
-        kind, data = support.product_answer(context["products"], family, hint, session.language)
-        return self._support(session, "account_inquiry", "ACCOUNT_DETAIL", kind, intent, message, family, **data)
+        """Productos, saldos, movimientos: no es credito. Se anota lo que pide y se ofrece un asesor (sin consultar datos)."""
+        family, _ = support.mentioned_family(message)
+        return self._support(session, "account_inquiry", "ACCOUNT_DETAIL", "non_credit", intent, message, family)
 
     def _support_case_status(self, session: Session, ctx: ToolContext, intent: str, message: str) -> dict:
-        """Lo que el banco ve del caso abierto mas relevante (categoria, fecha, estado). El avance lo informa un asesor."""
-        context = get_customer_context(ctx)
-        session.slots["context"] = context
-        top, lang = context["most_relevant"], session.language
-        if top is None:
-            return self._support(session, "case_status", "CASE_FOLLOWUP", "case_status_none", intent, message)
-        more = templates.render("case_more", lang, {}) if context["counts"]["open"] > 1 else ""
-        return self._support(session, "case_status", "CASE_FOLLOWUP", "case_status_open", intent, message,
-                             case=support.case_phrase(top, lang), status=support.status_text(top, lang), more=more)
+        """Estado de un reclamo o caso: lo ve un asesor. Se anota lo que pregunta y se ofrece conectarlo."""
+        return self._support(session, "case_status", "CASE_FOLLOWUP", "non_credit", intent, message)
 
     def _support_incident(self, session: Session, intent: str, message: str) -> dict:
         """Fraude, cargo no reconocido, robo, reclamo nuevo: se reconoce, se pide lo basico para el asesor y se ofrece conectar."""
@@ -356,8 +379,12 @@ class Orchestrator:
             return self._facts("fx_unavailable", "update_income", awaiting="income", ccy=err)
         self._declared(session)["income"] = inc
         session.slots["declared_income_conv"] = conv
-        if session.slots.get("pending_request", {}).get("amount"):
-            return self._evaluate(session, ctx, "update_income")  # recalculo inmediato con el dato nuevo
+        session.slots.pop("reasked", None)                       # llego la cifra: se puede volver a repreguntar
+        if session.slots.get("pending_request", {}).get("product"):
+            # recalculo inmediato con el dato nuevo; sin monto, la opcion mas alta del producto que ya pidio
+            return self._evaluate(session, ctx, "update_income")
+        if session.slots.get("offers_shown"):                    # ya vio el listado: se lo muestro recalculado
+            return self._offers(session, ctx)
         return self._facts("income_saved", "update_income", income=self._m(session, inc, profile["local_currency"]),
                            fx=self._fx_note(session))
 
@@ -381,7 +408,9 @@ class Orchestrator:
             {"type": "featured_offers", "policy_version": self.policy.version,
              "options": [{k: o[k] for k in ("option_code", "term_months", "offer_rate_pct", "offer_max_amount_usd")}
                          for o in offers.ordered]})
-        return self._facts("offers", "credit_offers", outcome="offers", lines=templates.join_list(lines, lang))
+        session.slots["offers_shown"] = True
+        kind = "offers_declared" if self._declared(session).get("income") is not None else "offers"
+        return self._facts(kind, "credit_offers", outcome="offers", lines=templates.join_list(lines, lang))
 
     def _proactive_accepted(self, session: Session, ctx: ToolContext, intent: str) -> dict:
         """'Si' a la oferta proactiva: se pide el monto, con lo mas alto como referencia (y como respuesta a un 'si')."""
@@ -453,7 +482,7 @@ class Orchestrator:
             kind = ("eligible" + card) if q.outcome == eng.ELIGIBLE else ("eligible_card_provisional" if card else "eligible_provisional")
             facts = self._facts(kind, intent, outcome=q.outcome, product=label,
                                 amount=self._m(session, req["amount"], ccy), months=str(q.term_months),
-                                payment=L(q.installment_usd), rate=fmt_pct(q.rate_pct), dti=fmt_pct(q.dti_after * 100),
+                                payment=L(q.installment_usd), rate=fmt_pct(q.rate_pct), dti=fmt_dti(q.dti_after),
                                 max_dti=max_dti, fx=self._fx_note(session))
             if can_ask:
                 return self._ask_household(session, facts)
@@ -482,7 +511,9 @@ class Orchestrator:
         if q.outcome == eng.DECLINED and "R06_SCORE_MISSING" in q.reasons and len(q.reasons) == 1:
             return self._offer_handoff(session, "MISSING_DATA", intent, kind="needs_data_score", outcome=q.outcome)
         if q.outcome == eng.DECLINED:
-            return self._offer_handoff(session, "POLICY_DECLINED", intent, kind="declined_generic", outcome=q.outcome)
+            why = templates.decline_why(q.reasons, lang, str(self.policy.params.get("min_tenure_months", "")))
+            return self._offer_handoff(session, "POLICY_DECLINED", intent, kind="declined_reason" if why else "declined_generic",
+                                       outcome=q.outcome, why=why)
 
         # Elegible, pero no para ese plazo o monto
         max_age = str(self.policy.params.get("max_age_at_maturity_years", ""))
@@ -531,12 +562,22 @@ class Orchestrator:
             if not amounts:
                 if intent == "confirm_no":
                     return self._after_household(session, "household_none", intent)
+                if intent in ("unknown", "confirm_yes") and session.slots.get("reasked") != awaiting:
+                    session.slots.update(reasked=awaiting, awaiting=awaiting)   # una sola vez
+                    facts = self._facts("ask_household_income", intent, awaiting=awaiting, ccy=ccy)
+                    facts["pre"] = ["reask_number"]
+                    return facts
                 return None
             value, conv, err = self._to_local(session, ctx, amounts[0], mention)
             if err:
                 session.slots["awaiting"] = "household_income"
                 return self._facts("fx_unavailable", intent, awaiting="household_income", ccy=err)
             session.slots["household_pending"] = {"income": value}
+            session.slots.pop("reasked", None)
+            if len(amounts) > 1 and _INSTALLMENTS.search(norm(message)):   # trajo tambien sus cuotas
+                return self._household_answer(session, ctx, "household_debt", intent, message, amounts[1:], mention)
+            if _NO_DEBT.search(norm(message)):                             # "...y no paga cuotas": cuotas 0
+                return self._household_answer(session, ctx, "household_debt", intent, message, [], mention)
             session.slots["awaiting"] = "household_debt"
             return self._facts("ask_household_debt", intent, awaiting="household_debt")
         # household_debt
@@ -702,7 +743,7 @@ class Orchestrator:
             "product": templates.product_label(req["product"], ev.get("tier"), lang),
             "amount": self._m(session, req["amount"], ccy), "months": str(ev["request"]["months"]),
             "rate": fmt_pct(ev["rate_pct"]), "payment": self._m(session, ev["payment"], ccy, 2),
-            "dti": fmt_pct(ev["dti_after"] * 100), "max_dti": fmt_pct(self.policy.max_dti * 100),
+            "dti": fmt_dti(ev["dti_after"]), "max_dti": fmt_pct(self.policy.max_dti * 100),
             "status": tx["provisional"] if ev["outcome"] == eng.ELIGIBLE_PROVISIONAL else tx["eligible"],
             "docs_status": docs_status, "ticket": ticket, "ticket_line": tx["ticket_line"].format(ticket=ticket) if ticket else "",
             "email": email,
@@ -789,12 +830,12 @@ class Orchestrator:
 
     # ------------------------------------------------------------------ derivacion
     def _offer_handoff(self, session: Session, reason: str, intent: str, kind: str = "needs_review",
-                       outcome: str | None = None) -> dict:
+                       outcome: str | None = None, **fmt: str) -> dict:
         """Pide confirmacion antes de derivar (la accion se ejecuta solo con un 'si' explicito)."""
         session.slots["awaiting"] = "confirm_handoff"
         session.slots["handoff_reason"] = reason
         text = templates.REASON_TEXT[session.language].get(reason, "")
-        return self._facts(kind, intent, outcome=outcome, awaiting="confirm_handoff", suggest="yes_no", reason=text)
+        return self._facts(kind, intent, outcome=outcome, awaiting="confirm_handoff", suggest="yes_no", reason=text, **fmt)
 
     def _handoff(self, session: Session, reason: str) -> dict:
         if session.handoff:
@@ -872,4 +913,5 @@ class Orchestrator:
                          handoff_ticket=facts.get("handoff_ticket"), suggested_replies=sug,
                          awaiting=facts.get("awaiting"), llm_rewritten=rewritten,
                          proactive_offer=facts.get("proactive_offer", False),
-                         summary_ready=bool(facts.get("summary")), email=facts.get("email"))
+                         summary_ready=bool(facts.get("summary")), email=facts.get("email"),
+                         disclaimer=disclaimer_for(facts))

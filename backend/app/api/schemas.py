@@ -107,6 +107,9 @@ class MessageResponse(BaseModel):
     summary_ready: bool = Field(default=False, description="True si la respuesta incluye el resumen final de la propuesta (hay PDF descargable).")
     email: EmailInfo | None = Field(default=None, description="Correo con el PDF del resumen (simulado en el prototipo).")
     evidence: Evidence | None = None
+    disclaimer: Literal["simulation", "final"] | None = Field(
+        default=None, description="Aviso a mostrar con la respuesta: 'simulation' cuando presenta una oferta (no es una "
+                                  "aprobacion), 'final' en el resumen de la oferta final (la decide el banco tras verificar).")
     trace_id: str
 
 

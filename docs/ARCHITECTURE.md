@@ -1,76 +1,85 @@
-# Arquitectura
+# Architecture
 
-Chat de crédito con verificación de identidad, política determinista, oferta proactiva y derivación a un humano.
-Datos y política sintéticos (prototipo).
+Credit chat with identity verification, a deterministic policy, proactive offers and handoff to a human advisor.
+Synthetic data and policy (prototype).
 
-## Decisión principal: el LLM habla, el código decide
+## Main decision: the LLM talks, code decides
 
-| Función | Quién la hace | Por qué |
+| Function | Who does it | Why |
 |---|---|---|
-| Entender el mensaje, detectar idioma, sentimiento y tema delicado | LLM, salida JSON validada | Es lenguaje, no decisión |
-| Redactar saludos, cierres y preguntas de aclaración | LLM, **solo mensajes de bajo riesgo** | Las decisiones y ofertas salen de plantillas revisadas |
-| Elegibilidad, monto máximo y tasa | Motor determinista: política 0.4 ([`CREDIT_RULES.md`](CREDIT_RULES.md)), la misma de gold, vía `data/policy/` (`backend/app/policy/engine.py`) | El modelo no puede aprobar ni inventar reglas |
-| Datos y permisos del cliente | Herramientas (`backend/app/agent/tools.py`), con el `customer_id` de la sesión autenticada | Ninguna herramienta recibe un `customer_id` del modelo |
-| Derivar a un humano | Código: solo si el cliente lo pidió de forma explícita o confirmó una oferta de derivación | Una derivación es una acción |
-| Cuándo ofrecer crédito sin que lo pidan | Código (`backend/app/agent/proactive.py`) | Es una decisión comercial y de consentimiento |
-| Riesgo predictivo de crédito | **No se entrena** | Sin señal en los datos (correlación −0,004; ver `docs/DATA.md`) |
+| Understand the message, detect language, sentiment and sensitive topics | LLM, validated JSON output | It is language, not a decision |
+| Word greetings, closings and clarifying questions | LLM, **low-risk messages only** | Decisions and offers come from reviewed templates |
+| Eligibility, maximum amount and rate | Deterministic engine: policy 0.4 ([`CREDIT_RULES.md`](CREDIT_RULES.md)), the same as gold, through `data/policy/` (`backend/app/policy/engine.py`) | The model cannot approve credit or invent rules |
+| Customer data and permissions | Tools (`backend/app/agent/tools.py`), with the `customer_id` of the authenticated session | No tool takes a `customer_id` from the model |
+| Hand off to a human | Code: only if the customer asked explicitly or confirmed a handoff offer | A handoff is an action |
+| When to offer credit unasked | Code (`backend/app/agent/proactive.py`) on gold `offer_mode` | It is a commercial and consent decision |
+| Predictive credit risk | **Not trained** | No signal in the data (correlation −0.004; see `docs/DATA.md`) |
 
-## Flujo
+## Flow
 
 ```
-Cliente ─► Interfaz (nginx) ─► /v1 ─► API FastAPI ─► Orquestador
-                                        │               ├─► NLU: Claude o reglas (esquema canónico en español)
-                                        │               ├─► Validación en código (montos, plazos, derivación explícita)
-                                        │               ├─► Política de crédito + herramientas
-                                        │               └─► Plantillas es/pt (+ reescritura acotada del LLM)
-                                        └─► Sesión (JWT atado a la sesión) · bloqueo por documento · logs JSON con trace_id
+Customer ─► UI (nginx) ─► /v1 ─► FastAPI API ─► Orchestrator
+                                     │               ├─► NLU: Claude or rules (canonical schema in Spanish)
+                                     │               ├─► Validation in code (amounts, terms, explicit handoff)
+                                     │               ├─► Credit policy + tools (gold data)
+                                     │               └─► es/pt templates (+ bounded LLM rewording)
+                                     └─► Session (JWT bound to the session) · lockout per document · JSON logs with trace_id
 ```
 
-El nginx de la interfaz sirve la página y reenvía `/v1` al backend agregando la clave de integración en el servidor; el
-puerto del backend no se publica y `/v1/handoffs` (cola de la consola del agente) se bloquea en el proxy.
+The UI's nginx serves the page and forwards `/v1` to the backend, adding the integration key on the server; the backend
+port is not published and `/v1/handoffs` (the agent console queue) is blocked at the proxy.
 
-## Conversación de crédito: moneda, solicitud y cierre
+## Scope and data the assistant uses
 
-El orquestador sigue siendo una máquina de estados (`awaiting`: `offer_interest`, `amount`, `income`, `proceed`, `docs_all`,
-`doc_item`). La moneda se detecta y convierte en código (`money.py`); los documentos pendientes salen de la política y de
-`docs_on_file` (`documents.py`); el cierre (`/end`) arma el resumen y deja el PDF en una bandeja simulada (`core/outbox.py`,
-`core/pdf.py`). El LLM solo clasifica y redacta mensajes de bajo riesgo; la identidad (¿eres un robot?) se responde con
-plantilla y cualquier texto que afirme ser humano se descarta.
+The chat handles **credit offers only** (personal loan, credit card, mortgage): showing the pre-approved offers,
+simulating amounts and terms, recalculating with what the customer declares and handing the lead to an advisor.
+Anything else (balances, products, the status of a complaint, the app, other banking topics) is **handed off to an
+advisor after the customer confirms**, without showing bank data; incidents (fraud, an unrecognized charge) get one
+line of empathy first. What the customer says is kept as declared, unverified notes for the advisor.
 
-## Autenticación
+The assistant's only data source is **gold** (`customer_credit_profile` and the policy tables, through the export):
+offers, eligibility and reason codes, the proactive decision (`offer_mode`), complaint counts (which already drive
+`offer_mode` and flag F04), credit product counts for the advisor summary, and the exchange rate (`fx_to_usd`,
+`fx_date`). It does not read raw cases, products, transactions or FX files, and they are not generated or shipped. The
+identity check (security questions, masked e-mail, documents on file) uses the customer master: that is
+authentication, not assistant knowledge. Offers and the final summary carry a `disclaimer` field (`simulation` /
+`final`) that the UI draws as its own panel.
 
-Tres preguntas de seguridad de opción única generadas desde los datos del cliente: ocupación registrada, ciudad donde
-abrió un producto (solo si fue en sucursal), año de apertura de un producto y año en que se hizo cliente. Sin montos ni
-fechas exactas; los distractores salen siempre del mismo universo (mismo país, años válidos) y el enunciado no lleva datos
-reales como terminaciones. Se exigen todas correctas; 3 fallos bloquean el documento 15 minutos; un documento inexistente
-recibe un reto señuelo con la misma forma. Límite conocido: adivinar acierta 1 de 64 veces por intento. Detalle, cobertura
-medida y límites en `backend/README.md`.
+## Credit conversation: currency, application and closing
 
-## Oferta proactiva
+The orchestrator is a state machine (`awaiting`: `offer_interest`, `amount`, `income`, `household`, `proceed`,
+`docs_all`, `doc_item`). Currency is detected and converted in code (`money.py`, gold rates); pending documents come
+from the policy and `docs_on_file` (`documents.py`); closing (`/end`) builds the summary and leaves the PDF in a
+simulated outbox (`core/outbox.py`, `core/pdf.py`). The LLM only classifies and words low-risk messages; identity
+questions ("are you a robot?") are answered from a template and any text claiming to be human is discarded.
 
-Al cerrar la conversación se ofrece un préstamo personal indicativo **solo si** el cliente acepta marketing, está
-preaprobado con datos del banco (no con ingreso declarado en el chat), no hubo sentimiento negativo ni tema delicado, no
-se le rechazó una solicitud, no se ofreció ya y **no le queda nada pendiente** (ni un tema de soporte en la sesión, ni un
-caso crítico abierto, ni uno abierto en los últimos 180 días). Quien pide un crédito se evalúa **sin** mirar el
-consentimiento de marketing: ese consentimiento solo gobierna lo proactivo.
+## Authentication
 
-## Soporte y contexto del cliente
+Three single-choice security questions generated from the customer's data: registered occupation, city where a product
+was opened (only if opened at a branch), year a product was opened and year the person became a customer. No amounts or
+exact dates; distractors always come from the same universe (same country, valid years) and the question carries no
+real data such as card endings. All answers must be right; 3 failures lock the document for 15 minutes; an unknown
+document gets a decoy challenge of the same shape. Known limit: a random guess passes 1 in 64 times per attempt.
+Details, measured coverage and limits in `backend/README.md`.
 
-El agente atiende primero lo que el cliente trae. Al autenticar lee, una vez, sus casos abiertos y la existencia de sus
-productos (lista blanca de campos: nunca saldos, movimientos ni montos). Responde con datos verificados (que un producto
-existe, categoría, fecha y estado de un caso), anota lo que el cliente cuenta como declarado y ofrece conectar con un
-asesor; no deriva solo. El resumen para el asesor lleva ese contexto, el ánimo, una prioridad y una ruta sugeridas.
-Detalle y límites en `backend/README.md`.
+## Proactive offer
 
-## Idioma
+When the conversation closes, an indicative offer is made **only if** gold marks the customer as `offer_mode =
+proactive` (eligible with bank data, marketing consent and no open critical complaint), there was no negative sentiment
+or sensitive topic, no request was declined, no offer was made already and no non-credit topic was handled in the
+session. A customer who asks for credit is evaluated **without** looking at marketing consent: consent only governs the
+proactive path.
 
-El LLM no traduce como paso aparte: entiende el mensaje y devuelve valores canónicos en español (intención, producto,
-monto, ingreso, idioma). La respuesta sale en el idioma de la sesión desde plantillas revisadas en español y portugués.
-Los montos y plazos se interpretan en **código** con formatos locales (1.500,00 y 1,500.00). Los datos del organizador no
-traen portugués: las pruebas en ese idioma las escribió el equipo. Pendiente de confirmar con los organizadores si el
-portugués es requisito real (el enunciado lo pide de forma explícita).
+## Language
 
-## Datos
+The LLM does not translate as a separate step: it understands the message and returns canonical values in Spanish
+(intent, product, amount, income, language). The reply comes out in the session's language from reviewed Spanish and
+Portuguese templates. Amounts and terms are parsed in **code** with local formats (1.500,00 and 1,500.00). In rules
+mode the language is detected from words specific to each language, so a word written the same in both ("crédito",
+"pesos") does not switch the conversation. The organizer data has no Portuguese: the Portuguese tests were written by
+the team.
+
+## Data
 
 The data layer runs in **Databricks** (Unity Catalog) as a medallion pipeline defined as code
 ([`data/databricks/`](../data/databricks/README.md), Databricks Asset Bundle):
@@ -106,23 +115,25 @@ S3 (organizer CSVs) → landing → bronze (all STRING, _rescued_data, lineage)
 - **Capacity:** the full job processes ~23 M rows in ~14 min on a 2X-Small serverless warehouse; the offer refresh takes
   ~1 min and grows with customers × 12 options. The API does not query Databricks online.
 
-## Operación
+## Operations
 
-- **Trazabilidad:** cada petición lleva `X-Trace-Id`; los logs son JSON con latencia, intención, resultado y, para el modelo,
-  tokens y tiempo. No se registran documentos, respuestas de seguridad ni cuerpos de petición.
-- **Reintentos acotados y respaldo seguro:** el cliente del modelo reintenta una vez; si falla o devuelve algo inválido, el
-  turno cae al extractor por reglas. El texto del modelo se descarta si trae cifras ajenas a los hechos calculados.
-- **Contenedores:** imágenes sin privilegios y con sistema de archivos de solo lectura; `docker compose up` levanta todo.
-- **Costo:** una llamada al modelo para entender cada mensaje, más otra solo para mensajes de bajo riesgo. Con Haiku 4.5 se
-  midieron ≈ 490 tokens de entrada y ≈ 105 de salida por turno (muestra pequeña).
+- **Traceability:** every request carries `X-Trace-Id`; logs are JSON with latency, intent, outcome and, for the model,
+  tokens and time. Documents, security answers and request bodies are not logged.
+- **Bounded retries and safe fallback:** the model client retries once; if it fails or returns something invalid, the
+  turn falls back to the rules extractor. The model's text is discarded if it carries figures foreign to the computed
+  facts. The customer's message is escaped before it reaches the model.
+- **Containers:** unprivileged images with a read-only file system; `docker compose up` starts everything; accepted
+  offers are written to a mounted, git-ignored folder so a restart does not lose them.
+- **Cost:** one model call to understand each message, plus another only for low-risk messages. With Haiku 4.5,
+  ≈ 490 input and ≈ 105 output tokens per turn were measured (small sample).
 
-## Qué falta para producción
+## What is missing for production
 
-- Externalizar el estado en memoria (sesiones, bloqueos y cola de derivaciones) para varias réplicas.
-- Un segundo factor de autenticación real; las preguntas actuales son una simulación con datos del mismo dataset.
-- Persistir la última oferta por cliente (hoy el tope de una oferta es por sesión) y límite de peticiones por IP.
+- Externalize the in-memory state (sessions, lockouts and handoff queue) for several replicas.
+- A real second authentication factor; the current questions are a simulation with data from the same dataset.
+- Persist the last offer per customer (today the one-offer cap is per session) and rate limiting per IP.
 - Business validation of the credit policy, and a learned risk model evaluated against the `credit_score` baseline
   (today the band comes from the score).
-- Evaluación de punta a punta con un conjunto reservado de conversaciones (ver `docs/EVALUATION.md`).
+- End-to-end evaluation with a held-out set of conversations (see `docs/EVALUATION.md`).
 - Data: least-privilege service principals, alerts on `pipeline_quality_metrics`, automatic bundle deployment from CI,
   incremental loads by `process_date` if new deliveries arrived, and the backend reading gold online.

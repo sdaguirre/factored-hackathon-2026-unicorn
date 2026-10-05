@@ -5,9 +5,8 @@ import logging
 
 from fastapi import APIRouter, Depends
 
-from app.agent import support, templates
-from app.agent.context import build_context
-from app.agent.tools import ToolContext, get_customer_context
+from app.agent import templates
+from app.agent.context import gold_context
 from app.api.schemas import (AuthState, CustomerSummary, QuestionOut, SessionCreate, SessionCreated, SessionInfo, VerifyRequest,
                              VerifyResponse)
 from app.auth import kba
@@ -75,20 +74,18 @@ def verify(body: VerifyRequest, session: Session = Depends(require_session),
         c = session.candidate
         session.customer_id, session.first_name, session.country = c.customer_id, c.first_name, c.country
         session.state, session.challenge = AUTHENTICATED, None
-        # Lo que le quedo pendiente al cliente, leido una vez al autenticar. Un fallo aqui no debe impedir la conversacion.
+        # Lo que el agente sabe del cliente sale de gold (agent/context.py). Un fallo aqui no debe impedir la conversacion.
         try:
-            session.slots["context"] = get_customer_context(ToolContext(c.customer_id, state.repo, state.policy, state.offers))
+            session.slots["context"] = gold_context(state.repo.credit_profile(c.customer_id))
         except Exception as exc:
             log(logger, "context_unavailable", error=type(exc).__name__)
-            session.slots["context"] = build_context([], [])
+            session.slots["context"] = gold_context({})
         state.lockout.register_success(session.doc_key)
-        # Si le quedo un caso pendiente reciente, se abre con eso y se espera su respuesta ("case_intro").
-        greeting, awaiting = support.welcome(session.language, c.first_name, session.slots["context"])
-        if awaiting:
-            session.slots["awaiting"] = awaiting
+        # El chat atiende ofertas de credito: el saludo es siempre ese, sin abrir con casos ni productos.
+        greeting = templates.render("welcome", session.language, {"first_name": c.first_name})
         return VerifyResponse(status="authenticated", attempts_left=s.auth_max_attempts - session.auth_attempts_used,
                               greeting=greeting,
-                              suggested_replies=templates.SUGGESTIONS["start_case" if awaiting else "start"][session.language],
+                              suggested_replies=templates.SUGGESTIONS["start"][session.language],
                               customer=CustomerSummary(customer_id=c.customer_id, first_name=c.first_name, country=c.country,
                                                        segment=c.segment, status=c.customer_status))
 

@@ -22,7 +22,6 @@ import logging
 from dataclasses import dataclass, field
 
 from app.agent import templates
-from app.agent.context import blocks_proactive_offer
 from app.agent.tools import ToolContext, get_offers, get_profile, to_local
 from app.core.fmt import fmt_money, fmt_pct
 from app.core.sessions import Session
@@ -60,8 +59,6 @@ def decide(session: Session, ctx: ToolContext) -> OfferDecision:
         return _no(NEGATIVE_MOMENT)
     if slots.get("case") or session.handoff:
         return _no(SUPPORT_TOPIC)
-    if blocks_proactive_offer(slots.get("context") or {}):
-        return _no(OPEN_CASE)
     last = slots.get("last_evaluation")
     if last and last["outcome"] in (eng.DECLINED, eng.NEEDS_DATA, eng.UNAVAILABLE):
         return _no(RECENT_DECLINE)

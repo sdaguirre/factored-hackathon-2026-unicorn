@@ -109,7 +109,9 @@ class AnthropicLLM:
 
     def extract(self, message: str, language_hint: str | None, yes_no_pending: bool = False) -> NLUResult:
         note = "Mensaje del sistema: hay una pregunta de si/no pendiente de respuesta.\n" if yes_no_pending else ""
-        text = self._call(SYSTEM_NLU, f"{note}<user_message>{message}</user_message>", 200)
+        # Escapado: el cliente no puede cerrar la etiqueta y escribir "fuera" de ella (p. ej. un falso mensaje del sistema)
+        safe = message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        text = self._call(SYSTEM_NLU, f"{note}<user_message>{safe}</user_message>", 200)
         m = re.search(r"\{.*\}", text, re.S)
         if not m:
             raise ValueError("el modelo no devolvio JSON")
@@ -125,6 +127,6 @@ class AnthropicLLM:
         ctx = view["customer_context"] or {}
         view["customer_context"] = {
             "open_cases": [{k: v for k, v in c.items() if k != "case_id"} for c in ctx.get("open_cases", [])],   # copia: no tocar el resumen
-            "counts": ctx.get("counts"), "flags": ctx.get("flags"),
+            "counts": ctx.get("counts"), "flags": ctx.get("flags"), "credit_profile_gold": ctx.get("credit"),
             "products_verified_by_bank": [p["type"] for p in ctx.get("products", []) if p.get("status") == "Active"]}
         return self._call(SYSTEM_SUMMARY, json.dumps(view, ensure_ascii=False, default=str), 400).strip() or None
