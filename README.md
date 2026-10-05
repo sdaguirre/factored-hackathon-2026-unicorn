@@ -50,7 +50,9 @@ docker compose up --build        # interfaz en http://localhost:8080
 | Pruebas automáticas del backend | 155 pruebas, sin red | No cubren la calidad conversacional del modelo real |
 | Intención del NLU, conjunto **reservado** (29 frases es/pt) | Reglas 79%. Claude 93–97% (dos corridas) | Una sola persona etiquetó; muestra pequeña |
 | Prueba en vivo con Claude Haiku 4.5 (13 turnos) | 0 caídas a reglas; ~1,1 s por llamada (p95 1,7 s); ~490 tokens de entrada y ~105 de salida por turno | Muestra pequeña, no es un benchmark |
-| Política de crédito sobre 150.000 clientes (solicitud tipo) | 44,2% elegible, 27,2% datos faltantes, 18,5% revisión humana, 10,1% rechazado | La política es inventada: no hay verdad de terreno externa |
+| Política de crédito preliminar del backend sobre 150.000 clientes (solicitud tipo) | 44,2% elegible, 27,2% datos faltantes, 18,5% revisión humana, 10,1% rechazado | Versión preliminar; se reemplaza por la 0.3 (fila siguiente) |
+| Credit policy 0.3 in gold (Databricks), 150,000 customers | 50,707 eligible (33.8%); 24,953 with a proactive offer; no offer mainly because of missing income (30,033, recoverable in the chat) or a blocked product (25,519). The Python implementation matches gold on all 1.8 M options | Synthetic policy defined by the team; no external ground truth |
+| Data pipeline in Databricks (bronze → silver → gold) | Full job in ~14 min; 90 quality metrics per run; 0 key duplicates; update fixture: 5 of 5 cases correct | Static data: updates are shown with a labeled fixture, not real deliveries |
 | Baseline de fraude con `fraud_score` del organizador | PR-AUC 0,577; recall 58% revisando el 1% con mayor riesgo; precisión 5% | Sin `fraud_score`, ningún modelo supera al azar en estos datos |
 
 Detalle, errores hallados y lo que falta medir: [`docs/EVALUATION.md`](docs/EVALUATION.md).
@@ -61,17 +63,21 @@ Detalle, errores hallados y lo que falta medir: [`docs/EVALUATION.md`](docs/EVAL
 |---|---|
 | Problema respaldado por datos | [`docs/DATA.md`](docs/DATA.md), [`analysis/`](analysis/) |
 | Sistema de IA funcionando | [`backend/`](backend/), [`frontend/`](frontend/) |
-| Automatización controlada, permisos fuera del texto del modelo, resumen para el humano | `backend/app/agent/`, `backend/app/policy/`, `backend/policy/credit_policy.yaml` |
-| Práctica de datos y ML sana | [`data/sql/`](data/sql/), [`analysis/`](analysis/), [`backend/eval/`](backend/eval/) |
+| Automatización controlada, permisos fuera del texto del modelo, resumen para el humano | `backend/app/agent/`, `backend/app/policy/`, credit rules in [`docs/CREDIT_RULES.md`](docs/CREDIT_RULES.md) |
+| Práctica de datos y ML sana | [`data/databricks/`](data/databricks/) (medallion, quality, contract, fixture), [`data/reference/`](data/reference/), [`data/policy/`](data/policy/), [`analysis/`](analysis/), [`backend/eval/`](backend/eval/) |
 | Calidad medida y manejo de fallos | [`docs/EVALUATION.md`](docs/EVALUATION.md), `backend/tests/` |
-| Ruta a operación | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/RUNBOOK.md`](docs/RUNBOOK.md) |
+| Ruta a operación | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/RUNBOOK.md`](docs/RUNBOOK.md), [`data/databricks/README.md`](data/databricks/README.md) (jobs, metrics, retries) |
 
 ## Estructura
 
 ```
 backend/    API FastAPI, agente, política de crédito, pruebas, evaluación del NLU, Dockerfile
 frontend/   interfaz de chat (HTML/CSS/JS sin dependencias) + nginx
-data/sql/   SQL de la capa gold (DuckDB) y su contrato
+data/databricks/  medallion pipeline in Databricks: bronze, silver, gold, quality, jobs (Asset Bundle), fixture
+data/reference/   synthetic reference tables: product catalog, rate and term grid, credit policy parameters
+data/policy/      reference implementation of the credit policy (Python) and its tests
+data/scripts/     reference loading, SQL runner, gold export, engine parity check
+data/sql/         gold layer SQL in DuckDB (local exploration)
 analysis/   exploración de datos, baselines (notebooks) y scripts de validación
 docs/       arquitectura, datos, evaluación, runbook
 ```
@@ -88,11 +94,17 @@ reconstruir el snapshot derivado del dataset real se necesita acceso al bucket d
 - **Falta una evaluación de punta a punta** con un conjunto reservado de conversaciones completas y las métricas del
   enunciado (resolución automática segura, contención, calidad del escalamiento, resultados inseguros con
   denominadores, latencia y costo por resolución, por idioma). Hoy hay pruebas unitarias y la evaluación del NLU.
-- La política de crédito es provisional; sus cortes (20% de endeudamiento, bandas de score, tasas) los debe validar el equipo.
+- The backend still evaluates with the preliminary policy (`backend/policy/credit_policy.yaml`). The reference version is
+  0.3 ([`docs/CREDIT_RULES.md`](docs/CREDIT_RULES.md), [`data/reference/`](data/reference/)), already computed in
+  Databricks; aligning the engine is in progress ([`docs/ENGINE_ALIGNMENT.md`](docs/ENGINE_ALIGNMENT.md)).
+- There is no learned risk model: the band comes from `credit_score`. In this data delinquency is unrelated to the score,
+  so a model has little signal; it still has to be evaluated against that baseline.
 - La verificación por preguntas de seguridad tiene 1/64 de probabilidad de acierto al azar por intento; mitigada con
   bloqueo, pero no sustituye un segundo factor real.
 - Sesiones, bloqueos y cola de derivaciones viven en memoria (una réplica). Para producción hay que externalizarlos.
-- Los datos de la capa gold están en SQL de DuckDB; la migración a Databricks y un proyecto dbt no están en este repositorio.
+- The data layer runs in Databricks as bundle jobs (`data/databricks/`), but the demo reads a Parquet export (static data,
+  no credentials in the container). Least-privilege service principals, alerts on the quality metrics and automatic
+  deployment to production are described, not implemented (see `docs/ARCHITECTURE.md`).
 - La interfaz solo se probó a mano; no hay pruebas automáticas ni auditoría de accesibilidad con lector de pantalla.
 
 ## Cómo trabajamos

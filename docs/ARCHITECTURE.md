@@ -9,7 +9,7 @@ Datos y política sintéticos (prototipo).
 |---|---|---|
 | Entender el mensaje, detectar idioma, sentimiento y tema delicado | LLM, salida JSON validada | Es lenguaje, no decisión |
 | Redactar saludos, cierres y preguntas de aclaración | LLM, **solo mensajes de bajo riesgo** | Las decisiones y ofertas salen de plantillas revisadas |
-| Elegibilidad, monto máximo y tasa | Motor determinista (`backend/app/policy/credit_engine.py` + `backend/policy/credit_policy.yaml`) | El modelo no puede aprobar ni inventar reglas |
+| Elegibilidad, monto máximo y tasa | Motor determinista (`backend/app/policy/credit_engine.py`); reference rules: policy 0.3 ([`CREDIT_RULES.md`](CREDIT_RULES.md)), computed in gold and implemented in `data/policy/` | El modelo no puede aprobar ni inventar reglas |
 | Datos y permisos del cliente | Herramientas (`backend/app/agent/tools.py`), con el `customer_id` de la sesión autenticada | Ninguna herramienta recibe un `customer_id` del modelo |
 | Derivar a un humano | Código: solo si el cliente lo pidió de forma explícita o confirmó una oferta de derivación | Una derivación es una acción |
 | Cuándo ofrecer crédito sin que lo pidan | Código (`backend/app/agent/proactive.py`) | Es una decisión comercial y de consentimiento |
@@ -72,9 +72,39 @@ portugués es requisito real (el enunciado lo pide de forma explícita).
 
 ## Datos
 
-El backend lee un snapshot parquet (capa gold exportada) detrás de la interfaz `CustomerRepository`; en producción sería un
-almacén con filtros por fila. Si no existe el snapshot derivado del dataset del organizador, usa el conjunto de ejemplo del
-equipo. La capa de datos está en `data/sql/` (DuckDB). **No implementado:** el proyecto dbt y la migración a Databricks.
+The data layer runs in **Databricks** (Unity Catalog) as a medallion pipeline defined as code
+([`data/databricks/`](../data/databricks/README.md), Databricks Asset Bundle):
+
+```
+S3 (organizer CSVs) → landing → bronze (all STRING, _rescued_data, lineage)
+  → silver (typed, deduplicated by key, latest version wins)
+  → gold: customer_credit_profile, customer_credit_offer_options, credit_offers, customer summaries
+```
+
+- **Credit policy as data:** the silver `ref_*` tables (catalog, rate and term grid, bands, segments, parameters) come from
+  [`data/reference/`](../data/reference/) and are version 0.3 of the rules ([`CREDIT_RULES.md`](CREDIT_RULES.md)). Gold
+  uses them to compute eligibility and offers for the 150,000 customers.
+- **Jobs:** `latam_bank_medallion` (bronze → gold, ~14 min, daily at 06:00 but paused because the data is static),
+  `credit_policy_refresh` (recomputes offers when the policy changes, ~1 min), `credit_gold_deploy` and
+  `data_update_fixture_test`. Bounded retry per task, timeouts and one run at a time.
+- **Quality and contract:** every run writes its metrics to `pipeline_quality_metrics` (history, failed runs included) and
+  then stops if one fails: key and content duplicates, nulls per critical column with its own threshold, rescued rows from
+  schema changes, the 20% capacity and band terms in the offers, and the **contract** of columns and types the API reads.
+- **Freshness and updates:** the data ends in June 2026 and no new deliveries arrive; offers are computed as of 2026-06-30
+  (`as_of_date`, a job parameter). With live data the cutoff would be the run date, and each run absorbs late arrivals
+  (full reload and dedup by `process_date`). Update correctness is shown with a labeled fixture: late update, exact
+  duplicate, late arrival, schema change and null key, all five handled correctly.
+- **Consumption:** the backend reads a Parquet export of gold behind the `CustomerRepository` interface
+  (`data/scripts/export_gold.py`), with no Databricks credentials in the container; in production it would read gold with
+  row filters. Without the export it uses the team's sample set. `data/sql/` keeps the DuckDB version for local work.
+- **Access (today and in production):** during the hackathon the team has broad permissions on the schemas. In
+  production: a pipeline service principal writes bronze/silver/gold; an API service principal only reads the profile and
+  options and inserts into `credit_offers`; people get read-only access.
+- **Retention:** bronze and silver can be rebuilt from the source CSVs. `credit_offers` holds `customer_id` and would be
+  kept for what each country's credit regulation requires, with `VACUUM` of the Delta history; quality metrics are kept as
+  the pipeline audit trail.
+- **Capacity:** the full job processes ~23 M rows in ~14 min on a 2X-Small serverless warehouse; the offer refresh takes
+  ~1 min and grows with customers × 12 options. The API does not query Databricks online.
 
 ## Operación
 
@@ -91,6 +121,8 @@ equipo. La capa de datos está en `data/sql/` (DuckDB). **No implementado:** el 
 - Externalizar el estado en memoria (sesiones, bloqueos y cola de derivaciones) para varias réplicas.
 - Un segundo factor de autenticación real; las preguntas actuales son una simulación con datos del mismo dataset.
 - Persistir la última oferta por cliente (hoy el tope de una oferta es por sesión) y límite de peticiones por IP.
-- Validación de la política de crédito por negocio y un modelo de riesgo con datos reales.
+- Business validation of the credit policy, and a learned risk model evaluated against the `credit_score` baseline
+  (today the band comes from the score).
 - Evaluación de punta a punta con un conjunto reservado de conversaciones (ver `docs/EVALUATION.md`).
-- Contrato de datos formal, política de frescura y la capa gold en Databricks.
+- Data: least-privilege service principals, alerts on `pipeline_quality_metrics`, automatic bundle deployment from CI,
+  incremental loads by `process_date` if new deliveries arrived, and the backend reading gold online.

@@ -71,7 +71,13 @@ un snapshot local) y la inyección con muchas variantes contra el modelo real.
 - **Política de crédito** sobre 150.000 clientes, solicitud tipo (préstamo personal, 36 meses, 3 veces el ingreso): 44,2%
   elegible, 27,2% datos faltantes, 18,5% revisión humana, 10,1% rechazado. Una preaprobación fija por segmento
   (Premium y Plus) aprobaría clientes que la política rechaza en 3,9% o manda a pedir datos en 27,4%, y dejaría fuera a un
-  40,6% que sí es elegible. Es la política provisional: no hay verdad de terreno externa.
+  40,6% que sí es elegible. Es la política preliminar del backend: no hay verdad de terreno externa.
+- **Credit policy 0.3 in gold** (Databricks, 150,000 customers, cutoff 2026-06-30): 50,707 eligible (33.8%), 24,953 with a
+  proactive offer and 25,754 only if the customer asks. The Python reference implementation
+  (`data/policy/credit_policy.py`) matches gold on all 1,800,000 options (`data/scripts/check_engine_parity.py`).
+- **Data pipeline quality:** 90 metrics per run in `pipeline_quality_metrics`; 0 key duplicates and 0 content duplicates
+  except 6 repeated `product_number` values; gold built on the typed silver is identical to the previous one, customer by
+  customer. Update fixture (static data): 5 of 5 cases handled correctly, and the assertions fail without the delivery.
 - **Triaje de fraude** (conjunto de prueba de 686.502 transacciones y 603 fraudes, partición temporal): el `fraud_score`
   del organizador da PR-AUC 0,577 y recall 58% revisando el 1% de mayor riesgo, con precisión de 5%. Un modelo sin
   `fraud_score` queda al nivel del azar (PR-AUC 0,0009).
