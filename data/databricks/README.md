@@ -24,6 +24,7 @@ snake_case; gold tables per customer are `customer_<subject>`.
 
 | File | Builds | Layer | When |
 |---|---|---|---|
+| `src/run_s3_copy.py` | Copies raw CSVs from AWS S3 bucket to landing volume `/Volumes/workspace/staging_latam_bank/landing/` via 16 MB chunked streaming | landing | Job `latam_bank_medallion` (task `s3_copy`) |
 | `01_bronze.py` | The 10 landing entities as delivered: explicit schema, all STRING, `_rescued_data`, `_source_file_path`, `_bronze_ingested_at`; large tables partitioned by `process_date` | bronze | Job `latam_bank_medallion` |
 | `02_silver.sql` | The same 10 tables typed and deduplicated by business key (latest version wins) | silver | Job `latam_bank_medallion` |
 | `02_silver_quality_checks.sql` | Bronze/silver metrics in `pipeline_quality_metrics`, then a gate that fails the run | silver | Job `latam_bank_medallion` |
@@ -122,6 +123,18 @@ default to the target's variables (`dev` → `_test`, `prod` → real schemas).
 | `credit_gold_deploy` | `gold_deploy_objects` | Manual, once per deploy |
 | `data_update_fixture_test` | `fixture_setup` → `silver_typed_dedup` → `silver_quality_checks` → `fixture_assertions`, on the `*_fixture` schemas | Manual; shows update correctness on static data |
 
+### Prerequisites: AWS Secret Scope
+The initial task `s3_copy` fetches AWS credentials from the Databricks secret scope `aws-datathon`.
+In a new or clean workspace, create the scope and populate the access keys using the Databricks CLI:
+
+```bash
+databricks secrets create-scope aws-datathon --profile <profile>
+databricks secrets put-secret aws-datathon aws-access-key-id --profile <profile>
+databricks secrets put-secret aws-datathon aws-secret-access-key --profile <profile>
+```
+
+> **Note on Shared Landing Volume:** Both `dev` and `prod` targets write to the same landing volume (`/Volumes/workspace/staging_latam_bank/landing`), as `01_bronze.py` reads from this shared path. Avoid running `dev` and `prod` copy tasks concurrently.
+
 - **Parameter `as_of_date`** (`YYYY-MM-DD`): empty uses the policy cutoff in
   `ref_policy_params` (2026-06-30 for the static hackathon data). With live data, set its
   default to `{{job.start_time.iso_date}}`.
@@ -129,9 +142,9 @@ default to the target's variables (`dev` → `_test`, `prod` → real schemas).
 
 ```bash
 cd data/databricks
-databricks bundle validate -t dev --profile <profile> --var="warehouse_id=<id>"
-databricks bundle deploy   -t dev --profile <profile> --var="warehouse_id=<id>"
-databricks bundle run latam_bank_medallion  -t dev --profile <profile> --var="warehouse_id=<id>"
+databricks bundle validate -t dev --profile <profile> --var="warehouse_id=<id>" --var="s3_bucket=<s3-bucket-name>"
+databricks bundle deploy   -t dev --profile <profile> --var="warehouse_id=<id>" --var="s3_bucket=<s3-bucket-name>"
+databricks bundle run latam_bank_medallion  -t dev --profile <profile> --var="warehouse_id=<id>" --var="s3_bucket=<s3-bucket-name>"
 databricks bundle run credit_policy_refresh -t dev --profile <profile> --var="warehouse_id=<id>"
 # one-off rebuild as of another date
 databricks bundle run credit_policy_refresh -t dev --profile <profile> --var="warehouse_id=<id>" --params as_of_date=2026-05-31

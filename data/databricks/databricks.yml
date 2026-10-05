@@ -1,6 +1,6 @@
 # Databricks Asset Bundle for the LATAM Bank medallion pipeline and the gold credit layer.
-# Deploy:  databricks bundle deploy -t dev --profile <profile> --var="warehouse_id=<sql-warehouse-id>"
-# Run:     databricks bundle run latam_bank_medallion -t dev --profile <profile> --var="warehouse_id=<sql-warehouse-id>"
+# Deploy:  databricks bundle deploy -t dev --profile <profile> --var="warehouse_id=<sql-warehouse-id>" --var="s3_bucket=<s3-bucket-name>"
+# Run:     databricks bundle run latam_bank_medallion -t dev --profile <profile> --var="warehouse_id=<sql-warehouse-id>" --var="s3_bucket=<s3-bucket-name>"
 # The workspace comes from the CLI profile; no host or ids are stored in the repository.
 bundle:
   name: credit-gold
@@ -11,6 +11,9 @@ include:
 variables:
   warehouse_id:
     description: SQL warehouse that runs the SQL tasks (serverless recommended)
+  s3_bucket:
+    description: AWS S3 source bucket containing the LATAM bank CSV files
+    default: ""
   # catalog.schema of each layer. Defaults are the real schemas; the dev target points to _test.
   bronze_schema:
     description: Bronze schema (raw CSV loads, all STRING)
