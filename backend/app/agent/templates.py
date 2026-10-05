@@ -29,8 +29,8 @@ REASON_TEXT = {
 T: dict[str, dict[str, str | list[str]]] = {
     # ---------------------------------------------------------------- presentacion e identidad
     "welcome": {
-        "es": "Hola {first_name}, soy el asistente virtual del banco. Puedo ayudarle con consultas sobre sus productos, con créditos o conectarlo con un asesor. ¿En qué le ayudo?",
-        "pt": "Olá {first_name}, sou o assistente virtual do banco. Posso ajudar com consultas sobre seus produtos, com crédito ou conectar você a um consultor. Em que posso ajudar?",
+        "es": "Hola {first_name}, soy el asistente virtual del banco. Puedo mostrarle sus ofertas de crédito preaprobadas (préstamo personal, tarjeta de crédito o hipoteca) y simular montos y plazos. Para cualquier otro tema lo conecto con un asesor. ¿En qué le ayudo?",
+        "pt": "Olá {first_name}, sou o assistente virtual do banco. Posso mostrar suas ofertas de crédito pré-aprovadas (empréstimo pessoal, cartão de crédito ou financiamento imobiliário) e simular valores e prazos. Para qualquer outro assunto, conecto você a um consultor. Em que posso ajudar?",
     },
     # Cuando le quedo algo pendiente (caso abierto reciente): se reconoce primero, antes de cualquier otro tema.
     "welcome_case": {
@@ -46,8 +46,8 @@ T: dict[str, dict[str, str | list[str]]] = {
         "pt": ["Olá de novo, {first_name}. Do que você precisa?", "Oi! Diga, {first_name}, em que posso ajudar?"],
     },
     "identity": {
-        "es": "Soy el asistente virtual del banco: un programa de inteligencia artificial, no una persona. Puedo ayudarle con consultas sobre sus productos y con créditos y, si prefiere hablar con un asesor, lo conecto.",
-        "pt": "Sou o assistente virtual do banco: um programa de inteligência artificial, não uma pessoa. Posso ajudar com consultas sobre seus produtos e com crédito e, se preferir falar com um consultor, eu conecto você.",
+        "es": "Soy el asistente virtual del banco: un programa de inteligencia artificial, no una persona. Le ayudo con sus ofertas de crédito y, para cualquier otro tema o si prefiere hablar con un asesor, lo conecto.",
+        "pt": "Sou o assistente virtual do banco: um programa de inteligência artificial, não uma pessoa. Ajudo com suas ofertas de crédito e, para qualquer outro assunto ou se preferir falar com um consultor, eu conecto você.",
     },
     # ---------------------------------------------------------------- conversacion general
     "thanks": {
@@ -63,40 +63,15 @@ T: dict[str, dict[str, str | list[str]]] = {
         "pt": ["Fico à disposição se precisar de mais alguma coisa. Tenha um ótimo dia!", "Estou por aqui se precisar. Tudo de bom!"],
     },
     "unknown": {
-        "es": ["Disculpe, no estoy seguro de haberle entendido. Puedo ayudarle con sus productos, con el estado de un caso, con créditos o conectarlo con un asesor. ¿Qué prefiere?",
-               "Perdone, no logré entenderle bien. ¿Quiere consultar sus productos, ver un caso que tenga abierto, ver créditos o hablar con un asesor?"],
-        "pt": ["Desculpe, não tenho certeza se entendi. Posso ajudar com seus produtos, com o andamento de um caso, com crédito ou conectar a um consultor. O que prefere?",
-               "Perdão, não consegui entender bem. Quer consultar seus produtos, ver um caso em aberto, ver crédito ou falar com um consultor?"],
+        "es": ["Disculpe, no estoy seguro de haberle entendido. Puedo ayudarle con sus ofertas de crédito (préstamo personal, tarjeta o hipoteca); para cualquier otro tema lo conecto con un asesor. ¿Qué prefiere?",
+               "Perdone, no logré entenderle bien. ¿Quiere ver sus ofertas de crédito o que lo conecte con un asesor?"],
+        "pt": ["Desculpe, não tenho certeza se entendi. Posso ajudar com suas ofertas de crédito (empréstimo pessoal, cartão ou financiamento imobiliário); para qualquer outro assunto, conecto você a um consultor. O que prefere?",
+               "Perdão, não consegui entender bem. Quer ver suas ofertas de crédito ou que eu conecte você a um consultor?"],
     },
-    # ---------------------------------------------------------------- soporte: productos, casos e incidentes
-    # Solo se confirma que existe y se deriva el detalle. Nunca saldos, movimientos ni montos.
-    "products_found": {
-        "es": "Sí, veo {what} a su nombre. Por seguridad, el detalle de saldos y movimientos lo revisa un asesor. Si quiere, cuénteme qué necesita saber (producto, fecha, monto) y lo dejo anotado para que no tenga que repetirlo. ¿Lo conecto con un asesor?",
-        "pt": "Sim, vejo {what} em seu nome. Por segurança, o detalhe de saldos e movimentos é visto por um consultor. Se quiser, me conte o que precisa saber (produto, data, valor) e eu deixo anotado para que você não precise repetir. Conecto você a um consultor?",
-    },
-    "products_none": {
-        "es": "No veo {art} {noun} {adj} a su nombre. Si cree que debería aparecer, un asesor puede revisarlo. Cuénteme qué ocurre y lo dejo anotado para que no tenga que repetirlo. ¿Lo conecto con un asesor?",
-        "pt": "Não vejo {art} {noun} {adj} em seu nome. Se acha que deveria aparecer, um consultor pode revisar. Me conte o que está acontecendo e eu deixo anotado para que você não precise repetir. Conecto você a um consultor?",
-    },
-    "products_overview": {
-        "es": "Veo estos productos activos a su nombre: {what}. Por seguridad, el detalle de saldos y movimientos lo revisa un asesor. Cuénteme qué necesita saber y lo dejo anotado para que no tenga que repetirlo. ¿Lo conecto con un asesor?",
-        "pt": "Vejo estes produtos ativos em seu nome: {what}. Por segurança, o detalhe de saldos e movimentos é visto por um consultor. Me conte o que precisa saber e eu deixo anotado para que você não precise repetir. Conecto você a um consultor?",
-    },
-    "products_empty": {
-        "es": "No veo productos activos a su nombre en este momento. Un asesor puede revisar su caso. Cuénteme qué necesita y lo dejo anotado. ¿Lo conecto con un asesor?",
-        "pt": "No momento não vejo produtos ativos em seu nome. Um consultor pode revisar seu caso. Me conte o que precisa e eu deixo anotado. Conecto você a um consultor?",
-    },
-    "case_status_open": {
-        "es": "Veo {case}; su estado es {status}.{more} El detalle del avance lo maneja un asesor. Si quiere, cuénteme qué le gustaría saber y lo dejo anotado. ¿Lo conecto con un asesor?",
-        "pt": "Vejo {case}; o status é {status}.{more} O detalhe do andamento é tratado por um consultor. Se quiser, me conte o que gostaria de saber e eu deixo anotado. Conecto você a um consultor?",
-    },
-    "case_more": {
-        "es": " Además, tiene otros casos abiertos.",
-        "pt": " Além disso, você tem outros casos abertos.",
-    },
-    "case_status_none": {
-        "es": "No veo reclamos ni casos abiertos a su nombre en este momento. Si se trata de algo reciente, cuénteme qué ocurrió y lo dejo anotado para un asesor. ¿Quiere que lo conecte con uno?",
-        "pt": "No momento não vejo reclamações nem casos abertos em seu nome. Se for algo recente, me conte o que aconteceu e eu deixo anotado para um consultor. Quer que eu conecte você a um?",
+    # ---------------------------------------------------------------- temas que no son de credito: a un asesor
+    "non_credit": {
+        "es": "Ese tema lo atiende un asesor, que puede ver el detalle de sus productos y casos. Si quiere, cuénteme qué necesita y lo dejo anotado para que no tenga que repetirlo. ¿Lo conecto ahora?",
+        "pt": "Esse assunto é atendido por um consultor, que pode ver o detalhe dos seus produtos e casos. Se quiser, me conte o que precisa e eu deixo anotado para que você não precise repetir. Conecto você agora?",
     },
     "incident": {
         "es": ["Lamento mucho lo ocurrido. Esto es importante y conviene que lo vea un asesor cuanto antes. Para que no tenga que repetirlo, cuénteme brevemente qué pasó (producto, fecha y monto, si los recuerda). ¿Lo conecto ahora con un asesor?",
@@ -434,11 +409,8 @@ EMAIL_SUBJECT = {"es": "Resumen de su propuesta de crédito", "pt": "Resumo da s
 
 SUGGESTIONS = {
     "yes_no": {"es": ["Sí", "No"], "pt": ["Sim", "Não"]},
-    "start": {"es": ["Consultar mis productos", "Ver mi oferta de crédito", "Hablar con un asesor"],
-              "pt": ["Consultar meus produtos", "Ver minha oferta de crédito", "Falar com um consultor"]},
-    # Al abrir con un caso pendiente: lo primero es ese caso.
-    "start_case": {"es": ["Sí, cuénteme", "Consultar mis productos", "Hablar con un asesor"],
-                   "pt": ["Sim, conte", "Consultar meus produtos", "Falar com um consultor"]},
+    "start": {"es": ["Ver mis ofertas de crédito", "Hablar con un asesor"],
+              "pt": ["Ver minhas ofertas de crédito", "Falar com um consultor"]},
 }
 
 

@@ -127,6 +127,6 @@ class AnthropicLLM:
         ctx = view["customer_context"] or {}
         view["customer_context"] = {
             "open_cases": [{k: v for k, v in c.items() if k != "case_id"} for c in ctx.get("open_cases", [])],   # copia: no tocar el resumen
-            "counts": ctx.get("counts"), "flags": ctx.get("flags"),
+            "counts": ctx.get("counts"), "flags": ctx.get("flags"), "credit_profile_gold": ctx.get("credit"),
             "products_verified_by_bank": [p["type"] for p in ctx.get("products", []) if p.get("status") == "Active"]}
         return self._call(SYSTEM_SUMMARY, json.dumps(view, ensure_ascii=False, default=str), 400).strip() or None

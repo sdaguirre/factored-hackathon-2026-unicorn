@@ -43,7 +43,6 @@ class CustomerRepository(Protocol):
     def find_by_document(self, document_number: str) -> Customer | None: ...
     def credit_profile(self, customer_id: str) -> dict: ...
     def products(self, customer_id: str) -> list[dict]: ...
-    def recent_transactions(self, customer_id: str, limit: int = 40) -> list[dict]: ...
     def branch_cities(self, country: str | None = None) -> list[str]: ...
     def branch_city(self, branch_id: str) -> str | None: ...
     def branch_country(self, branch_id: str) -> str | None: ...
@@ -53,15 +52,6 @@ class CustomerRepository(Protocol):
     def fx_rate(self, source: str, target: str) -> FxQuote | None: ...
     def contact_email_masked(self, customer_id: str) -> str | None: ...
     def documents_on_file(self, customer_id: str) -> set[str]: ...
-    def case_context(self, customer_id: str) -> list[dict]: ...
-    def product_overview(self, customer_id: str) -> list[dict]: ...
-
-
-# Lo unico que el agente puede saber de un caso abierto y de un producto. Es una lista blanca a proposito: el chat solo
-# confirma que existen y los deriva; nunca detalla saldos, limites, montos reclamados ni descripciones.
-CASE_FIELDS = ("case_source", "case_id", "opened_on", "days_open", "channel", "category", "case_type", "priority", "status",
-               "is_escalated", "sla_breached", "sentiment", "is_repeat_complainer")
-PRODUCT_FIELDS = ("product_type", "last4", "product_status")
 
 
 def _clean(v):
@@ -79,7 +69,6 @@ class SnapshotRepository:
         self._customers = pd.read_parquet(data_dir / "customers.parquet")
         self._products = pd.read_parquet(data_dir / "products.parquet")
         self._branches = pd.read_parquet(data_dir / "branches.parquet")
-        self._tx = pd.read_parquet(data_dir / "transactions.parquet")
         self._by_doc = {str(r.document_number): r.customer_id for r in self._customers.itertuples()}
         self._credit = {r["customer_id"]: clean_profile(r)
                         for r in pd.read_parquet(data_dir / "credit_profile.parquet").to_dict("records")}
@@ -89,20 +78,12 @@ class SnapshotRepository:
         self._cities = sorted(set(self._branches.city.dropna()))
         self._cities_by_country = {c: sorted(set(g.city.dropna())) for c, g in self._branches.groupby("country")}
         self._prod_by_c = {k: g for k, g in self._products.groupby("customer_id")}
-        self._tx_by_c = {k: g.sort_values("transaction_date", ascending=False)
-                         for k, g in self._tx.groupby("customer_id")}
-        # Tasas de cambio (opcional): sin el archivo, el agente avisa que no puede convertir monedas.
-        self._fx: dict[tuple[str, str], tuple[float, str]] = {}
-        fx_path = data_dir / "fx_rates.parquet"
-        if fx_path.exists():
-            for r in pd.read_parquet(fx_path).itertuples():
-                self._fx[(r.source_currency, r.target_currency)] = (float(r.exchange_rate), str(r.date)[:10])
-        # Casos abiertos por cliente (opcional): sin el archivo, el agente simplemente no tiene historial pendiente.
-        self._cases: dict[str, list[dict]] = {}
-        cases_path = data_dir / "case_context.parquet"
-        if cases_path.exists():
-            for cid, g in pd.read_parquet(cases_path).groupby("customer_id"):
-                self._cases[cid] = [{k: _clean(v) for k, v in rec.items()} for rec in g[list(CASE_FIELDS)].to_dict("records")]
+        # Tasas de cambio: las del perfil de gold (fx_to_usd y fx_date por moneda local), las mismas con que gold calculo
+        # las ofertas. Monedas fuera de esas (y de USD): el agente avisa que no puede convertirlas.
+        self._fx_usd: dict[str, tuple[float, str]] = {"USD": (1.0, "")}
+        for p in self._credit.values():
+            if p.get("local_currency") and p.get("fx_to_usd"):
+                self._fx_usd.setdefault(p["local_currency"], (float(p["fx_to_usd"]), str(p.get("fx_date") or "")[:10]))
 
     def find_by_document(self, document_number: str) -> Customer | None:
         cid = self._by_doc.get(str(document_number).strip())
@@ -124,10 +105,6 @@ class SnapshotRepository:
     def products(self, customer_id: str) -> list[dict]:
         g = self._prod_by_c.get(customer_id)
         return [] if g is None else g.to_dict("records")
-
-    def recent_transactions(self, customer_id: str, limit: int = 40) -> list[dict]:
-        g = self._tx_by_c.get(customer_id)
-        return [] if g is None else g.head(limit).to_dict("records")
 
     def branch_cities(self, country: str | None = None) -> list[str]:
         """Ciudades con sucursal; con `country`, solo las de ese pais (los distractores de una pregunta deben salir de ahi)."""
@@ -158,16 +135,13 @@ class SnapshotRepository:
         return self._customers.customer_id.iloc[rng.randrange(len(self._customers))]
 
     def fx_rate(self, source: str, target: str) -> FxQuote | None:
-        """Tasa directa del dataset o, si falta el par, triangulada por USD. None si no hay datos."""
+        """Tasa source -> target con el fx_to_usd de gold (1 unidad = fx_to_usd USD). None si alguna moneda no esta."""
         if source == target:
             return FxQuote(source, target, 1.0, "")
-        if (source, target) in self._fx:
-            rate, as_of = self._fx[(source, target)]
-            return FxQuote(source, target, rate, as_of)
-        a, b = self._fx.get((source, "USD")), self._fx.get(("USD", target))
-        if a and b:
-            return FxQuote(source, target, a[0] * b[0], min(a[1], b[1]))
-        return None
+        a, b = self._fx_usd.get(source), self._fx_usd.get(target)
+        if not a or not b:
+            return None
+        return FxQuote(source, target, a[0] / b[0], max(a[1], b[1]))
 
     def contact_email_masked(self, customer_id: str) -> str | None:
         """Correo registrado, enmascarado (j***@dominio). La direccion completa nunca sale de esta capa."""
@@ -185,14 +159,6 @@ class SnapshotRepository:
             return {"id_copy"}
         raw = _clean(self._cust.loc[customer_id].docs_on_file)
         return {d for d in str(raw).split(",") if d} if raw else set()
-
-    def case_context(self, customer_id: str) -> list[dict]:
-        """Casos abiertos del cliente (reclamos abiertos e interacciones sin resolver), solo con CASE_FIELDS."""
-        return [dict(c) for c in self._cases.get(customer_id, [])]
-
-    def product_overview(self, customer_id: str) -> list[dict]:
-        """Existencia de productos: tipo, terminacion y estado. Nada de saldos, limites ni fechas."""
-        return [{k: _clean(p.get(k)) for k in PRODUCT_FIELDS} for p in self.products(customer_id)]
 
     def sample_documents(self, n: int = 5) -> list[str]:
         """Solo para pruebas y README (datos sinteticos)."""

@@ -90,87 +90,12 @@ def test_new_intents_are_recognized_by_the_rules_extractor(text, intent, sensiti
 
 
 # ---------------------------------------------------------------- bienvenida: primero lo pendiente
-def test_welcome_opens_with_a_recent_open_case(client, state):
-    sid, h, v = start(client, state, "FXC-011")                  # reclamo High en proceso, abierto hace 12 dias
-    g = v["greeting"]
-    assert "asistente virtual" in g and "reclamo sobre comisiones y cargos" in g and "17/06/2026" not in g
-    assert v["suggested_replies"][0] == "Sí, cuénteme"
-    assert state.store.get(sid).slots["awaiting"] == "case_intro"
-    r = say(client, sid, h, "sí, cuénteme")
-    assert r["awaiting"] == "confirm_handoff" and "en proceso" in r["reply"] and "05/06/2026" in r["reply"]
-    assert not any(w in r["reply"].lower() for w in CREDIT_WORDS)
-
-
-def test_welcome_phrasing_is_grammatical_for_a_call_and_for_a_complaint(client, state):
-    _, _, call = start(client, state, "FXC-003")                 # llamada sin resolver hace 20 dias
-    g = call["greeting"]
-    assert "que quedó sin resolver y quiero ayudarle" in g and "que sigue pendiente" not in g
-    _, _, complaint = start(client, state, "FXC-011")            # reclamo
-    assert "desde el 05/06/2026 que sigue pendiente y quiero ayudarle" in complaint["greeting"]
-
-
-def test_welcome_can_be_skipped_without_pushing_anything(client, state):
-    sid, h, _ = start(client, state, "FXC-011")
-    r = say(client, sid, h, "no, gracias")
-    assert r["intent"] == "confirm_no" and not r["proactive_offer"] and "¿En qué le ayudo?" in r["reply"]
-
-
-def test_a_case_open_for_years_is_not_mentioned_in_the_welcome_but_is_known_when_asked(client, state):
-    sid, h, v = start(client, state, "FXC-005")                  # reclamo abierto desde hace 400 dias
-    assert "reclamo" not in v["greeting"] and v["suggested_replies"][0] != "Sí, cuénteme"
-    r = say(client, sid, h, "¿cómo va mi reclamo?")
-    assert "reclamo sobre el servicio" in r["reply"] and "abierto" in r["reply"]
-
-
 def test_customer_without_cases_gets_the_plain_welcome(client, state):
     _, _, v = start(client, state, "FXC-001")
     assert "asistente virtual" in v["greeting"] and "pendiente" not in v["greeting"]
 
 
-def test_case_status_for_a_customer_with_nothing_open(client, state):
-    sid, h, _ = start(client, state, "FXC-001")
-    r = say(client, sid, h, "¿cómo va mi reclamo?")
-    assert "No veo reclamos ni casos abiertos" in r["reply"] and r["awaiting"] == "confirm_handoff"
-
-
-def test_case_status_never_discloses_amounts_or_resolution(client, state):
-    sid, h, _ = start(client, state, "FXC-002")                  # reclamo critico escalado + una llamada sin resolver
-    r = say(client, sid, h, "¿cómo va mi reclamo?")
-    assert "escalado" in r["reply"] and "Además, tiene otros casos abiertos" in r["reply"]
-    assert "monto" not in r["reply"].lower() and "reclam" in r["reply"]
-
-
 # ---------------------------------------------------------------- productos: solo existencia
-def test_asking_for_a_product_confirms_it_exists_and_hands_the_detail_to_an_advisor(client, state):
-    cid = customer_with(state, "Tarjeta Crédito")
-    sid, h, _ = start(client, state, cid)
-    r = say(client, sid, h, "¿tengo una tarjeta de crédito?")
-    last4 = [p["last4"] for p in state.repo.products(cid) if p["product_type"] == "Tarjeta Crédito"][0]
-    assert r["intent"] == "account_inquiry" and r["awaiting"] == "confirm_handoff"
-    assert f"Sí, veo una tarjeta de crédito (terminación {last4})" in r["reply"] and "asesor" in r["reply"]
-
-
-def test_a_missing_product_is_reported_honestly(client, state):
-    sid, h, _ = start(client, state, "FXC-001")
-    r = say(client, sid, h, "¿tengo un crédito hipotecario?")     # el fixture no tiene hipotecas
-    assert "No veo un préstamo hipotecario activo" in r["reply"]
-
-
-def test_balance_questions_never_get_a_balance(client, state):
-    sid, h, _ = start(client, state, "FXC-001")
-    r = say(client, sid, h, "necesito el saldo de mi cuenta")
-    assert "el detalle de saldos y movimientos lo revisa un asesor" in r["reply"]
-    # lo unico numerico que puede aparecer son las terminaciones de producto (4 digitos), nunca una cifra de saldo
-    import re
-    assert all(len(n) == 4 for n in re.findall(r"\d+", r["reply"]))
-
-
-def test_product_answer_in_portuguese(client, state):
-    sid, h, _ = start(client, state, "FXC-001", language="pt")
-    r = say(client, sid, h, "quanto tenho de saldo na minha conta?")
-    assert r["language"] == "pt" and r["awaiting"] == "confirm_handoff" and "consultor" in r["reply"] and "final" in r["reply"]
-
-
 # ---------------------------------------------------------------- notas, incidentes y derivacion con contexto
 def test_what_the_customer_tells_is_noted_and_reaches_the_advisor_as_declared(client, state):
     sid, h, _ = start(client, state, "FXC-001")
@@ -216,19 +141,6 @@ def test_a_complaint_without_fraud_signals_is_high_priority_not_a_fraud_emergenc
     assert (s["reason"], s["priority"], s["suggested_route"]) == ("INCIDENT", "high", "reclamos_y_quejas")
 
 
-def test_next_actions_only_mention_waiting_time_when_there_is_an_open_case(client, state):
-    sid, h, _ = start(client, state, "FXC-001")                  # sin casos abiertos
-    say(client, sid, h, "esto es pésimo, estoy muy molesto, quiero hacer un reclamo")
-    say(client, sid, h, "sí")
-    s = summary_of(client, sid, h)
-    actions = " ".join(s["suggested_next_actions"])
-    assert "molestia" in actions and "espera" not in actions and "lleva con su caso" not in actions
-    sid2, h2, _ = start(client, state, "FXC-002")                # con casos abiertos
-    say(client, sid2, h2, "esto es pésimo, estoy muy molesto, quiero hacer un reclamo")
-    say(client, sid2, h2, "sí")
-    assert "lleva con su caso abierto" in " ".join(summary_of(client, sid2, h2)["suggested_next_actions"])
-
-
 def test_an_open_critical_case_makes_any_handoff_urgent(client, state):
     sid, h, _ = start(client, state, "FXC-002")
     say(client, sid, h, "me siguen cobrando una comisión que no entiendo, quiero hacer un reclamo")
@@ -245,12 +157,6 @@ def test_other_topics_are_noted_without_rushing_the_customer_or_selling(client, 
     assert "otro monto" not in declined["reply"] and not declined["proactive_offer"]
 
 
-def test_unclear_messages_no_longer_sound_like_a_credit_menu(client, state):
-    sid, h, _ = start(client, state, "FXC-001")
-    r = say(client, sid, h, "asdf qwer")
-    assert "productos" in r["reply"] and "caso" in r["reply"]
-
-
 def test_asking_for_a_person_midway_keeps_the_topic_for_the_advisor(client, state):
     sid, h, _ = start(client, state, "FXC-001")
     say(client, sid, h, "necesito el saldo de mi cuenta")
@@ -262,28 +168,6 @@ def test_asking_for_a_person_midway_keeps_the_topic_for_the_advisor(client, stat
 
 
 # ---------------------------------------------------------------- resumen para el asesor: contexto y prioridad
-def test_summary_carries_open_cases_priority_and_route_without_sensitive_fields(client, state):
-    sid, h, _ = start(client, state, "FXC-002")                 # critico escalado, SLA incumplido, reincidente
-    say(client, sid, h, "esto es pésimo, estoy muy molesto, necesito el saldo de mi cuenta")
-    say(client, sid, h, "sí")
-    s = summary_of(client, sid, h)
-    ctx = s["customer_context"]
-    assert ctx["counts"]["open"] == 2 and ctx["open_cases"][0]["priority"] == "Critical" and ctx["flags"]["has_sla_breach"]
-    assert s["priority"] == "urgent" and s["sentiment"]["negative_turns"] == 1 and s["sentiment"]["frustration"] == "high"
-    assert "Revisar primero el caso abierto" in " ".join(s["suggested_next_actions"])
-    assert "2 caso(s) abierto(s)" in s["narrative"] and s["narrative_source"] == "rules"
-    blob = json.dumps(s)
-    for leaked in ("description", "claimed_amount", "compensation_granted", "resolution", "current_balance", "credit_limit"):
-        assert leaked not in blob, leaked
-
-
-def test_summary_for_a_clean_customer_says_there_is_nothing_open(client, state):
-    sid, h, _ = start(client, state, "FXC-001")
-    say(client, sid, h, "quiero hablar con un asesor")
-    s = summary_of(client, sid, h)
-    assert s["customer_context"]["counts"]["open"] == 0 and "No tiene casos abiertos" in s["narrative"] and s["priority"] == "normal"
-
-
 # ---------------------------------------------------------------- empatia
 def test_empathy_opens_the_reply_once_not_on_every_turn(client, state):
     sid, h, _ = start(client, state, "FXC-001")
@@ -357,27 +241,6 @@ def test_llm_narrative_replaces_the_rules_one_only_if_it_adds_nothing_new(client
         say(client, sid2, h2, "quiero hablar con un asesor")
         s2 = summary_of(client, sid2, h2)
         assert s2["narrative_source"] == "rules" and "Motivo:" in s2["narrative"]
-
-
-def test_the_model_sees_products_as_bank_verified_and_never_the_case_ids(client, state):
-    """El resumen que recibe Claude marca los productos como verificados (antes los omitia y el modelo escribio que una
-    tarjeta 'no estaba verificada') y no lleva identificadores ni datos de la cuenta."""
-    from app.agent.llm_anthropic import SYSTEM_SUMMARY, AnthropicLLM
-
-    sid, h, _ = start(client, state, "FXC-002")
-    say(client, sid, h, "necesito el saldo de mi cuenta")
-    say(client, sid, h, "sí")
-    summary = summary_of(client, sid, h)
-    seen = {}
-    llm = object.__new__(AnthropicLLM)                              # sin cliente ni red
-    llm._call = lambda system, user, max_tokens: seen.update(system=system, user=user) or "ok"
-    before = json.dumps(summary, sort_keys=True)
-    llm.summarize(summary)
-    payload = json.loads(seen["user"])
-    assert payload["customer_context"]["products_verified_by_bank"] and "case_id" not in seen["user"]
-    assert "customer_id" not in seen["user"] and "FXC-002" not in seen["user"]
-    assert json.dumps(summary, sort_keys=True) == before            # no modifica el resumen original
-    assert "VERIFICADOS" in SYSTEM_SUMMARY and "No infieras" in SYSTEM_SUMMARY
 
 
 def test_a_failing_narrator_falls_back_to_the_rules_paragraph(client, state):

@@ -10,11 +10,10 @@ from __future__ import annotations
 import re
 
 from app.agent.language import norm
-from app.agent.support import redact, status_text
+from app.agent.support import redact
 from app.core.sessions import Session
 
 TRANSCRIPT_TAIL = 8
-TOP_CASES = 5
 
 REASON_LABEL = {
     "USER_REQUEST": "el cliente pidió hablar con una persona", "OTHER_TOPIC": "tema que el asistente no resuelve",
@@ -85,20 +84,14 @@ def _next_actions(reason: str, ctx: dict, case: dict | None, sentiment: dict) ->
     flags = ctx.get("flags", {})
     if sentiment["frustration"] != "none":
         # solo se habla de espera si hay un caso abierto que la respalde; si no, seria afirmar algo que el dato no dice
-        out.append("Abrir reconociendo la molestia del cliente" + (" y el tiempo que lleva con su caso abierto." if ctx.get("open_cases") else "."))
-    if ctx.get("open_cases"):
-        out.append("Revisar primero el caso abierto más relevante antes de ofrecer otros productos.")
+        out.append("Abrir reconociendo la molestia del cliente.")
+    if ctx.get("counts", {}).get("open"):
+        out.append("Revisar sus reclamos abiertos en el sistema de casos antes de formalizar el crédito.")
     if flags.get("has_sla_breach"):
         out.append("Hay un caso con SLA incumplido: priorizar su atención.")
     if case and case.get("notes"):
         out.append("Validar con el cliente lo que declaró en el chat (no está verificado).")
     return out
-
-
-def _case_line(c: dict) -> str:
-    kind = "reclamo" if c["case_source"] == "complaint" else "interacción sin resolver"
-    prio = f", prioridad {c['priority']}" if c.get("priority") else ""
-    return f"{kind} de {c.get('category')} ({status_text(c, 'es')}, {c.get('days_open')} días{prio})"
 
 
 def build_narrative(summary: dict) -> str:
@@ -107,13 +100,13 @@ def build_narrative(summary: dict) -> str:
     notes = [n["text"] for n in summary.get("case_notes", [])]
     if notes:
         parts.append("El cliente contó (sin verificar): " + "; ".join(f"«{t}»" for t in notes[:3]) + ".")
-    ctx = summary["customer_context"]
-    if ctx["open_cases"]:
-        top = ctx["open_cases"][0]
-        extra = f" y {ctx['counts']['open'] - 1} más" if ctx["counts"]["open"] > 1 else ""
-        parts.append(f"Tiene {ctx['counts']['open']} caso(s) abierto(s); el más relevante: {_case_line(top)}{extra}.")
+    credit = summary["customer_context"].get("credit") or {}
+    n = credit.get("open_complaints", 0)
+    if n:
+        parts.append(f"Según gold tiene {n} reclamo(s) abierto(s) ({credit.get('open_priority_complaints', 0)} de prioridad "
+                     f"alta o crítica, {credit.get('open_critical_complaints', 0)} crítico(s)); el detalle está en el sistema de casos.")
     else:
-        parts.append("No tiene casos abiertos.")
+        parts.append("Según gold no tiene reclamos abiertos.")
     s = summary["sentiment"]
     if s["negative_turns"]:
         parts.append(f"Mostró molestia en {s['negative_turns']} de {s['turns']} mensajes.")
@@ -155,13 +148,14 @@ def build_summary(session: Session, ticket_id: str, created_at: str, reason: str
         "topic": {"primary": case["topic"], "all": list(case["topics"]), "families": list(case["families"])} if case else None,
         # Lo que el cliente escribio, con numeros largos y correos omitidos. Es DECLARADO: no esta verificado.
         "case_notes": list(case["notes"]) if case else [],
+        # Solo de gold customer_credit_profile (agent/context.py): conteos de reclamos y de productos de credito
         "customer_context": {
-            "open_cases": [{k: c.get(k) for k in ("case_source", "case_id", "category", "case_type", "priority", "status",
-                                                  "opened_on", "days_open", "is_escalated", "sla_breached", "channel")}
-                           for c in context.get("open_cases", [])[:TOP_CASES]],
+            "source": context.get("source", "gold.customer_credit_profile"),
+            "open_cases": [],
             "counts": context.get("counts", {"open": 0, "complaints": 0, "interactions": 0, "high_priority": 0}),
             "flags": flags,
-            "products": context.get("products", []),
+            "credit": context.get("credit", {}),
+            "products": [],
         },
         "request": session.slots.get("pending_request"),
         # Lo que el cliente declaro en el chat (moneda local, SIN verificar): ingreso, ingreso y cuotas de alguien del hogar

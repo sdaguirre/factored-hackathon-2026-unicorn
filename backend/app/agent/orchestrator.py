@@ -19,7 +19,7 @@ from app.agent.handoff import build_summary
 from app.agent.language import norm, parse_amounts, parse_months
 from app.agent.llm import LLM, MockLLM
 from app.agent.nlu import HUMAN_REQUEST, NLUResult
-from app.agent.tools import (HandoffQueue, ToolContext, accept_offer, get_customer_context, get_offers, get_profile,
+from app.agent.tools import (HandoffQueue, ToolContext, accept_offer, get_offers, get_profile,
                              new_ticket_id, recalculate_offer, to_local, utc_iso)
 from app.core.fmt import fmt_money, fmt_pct
 from app.core.offers import OfferStore
@@ -201,11 +201,6 @@ class Orchestrator:
             return self._facts("currency_unsupported", intent, awaiting=awaiting, ccy=mention.unsupported,
                                supported=", ".join(money.SUPPORTED))
 
-        if awaiting == "case_intro":                              # abrimos con un caso pendiente: "¿quiere que le cuente?"
-            if intent == "confirm_yes":
-                return self._support_case_status(session, ctx, intent, "")     # el "si" no es un dato del caso: no se anota
-            if intent == "confirm_no":
-                return self._facts("case_skip", intent, suggest="start")
         if awaiting == "confirm_handoff":
             # Ya no se encadena una oferta de credito tras atender otro tema: el cliente vino por otra cosa.
             if intent == "confirm_yes":
@@ -315,23 +310,13 @@ class Orchestrator:
         return self._facts(kind, intent, awaiting="confirm_handoff", suggest="yes_no", **fmt)
 
     def _support_account(self, session: Session, ctx: ToolContext, intent: str, message: str) -> dict:
-        """'¿Tengo una tarjeta?', 'mi saldo': confirma que el producto existe (tipo y terminacion) y deriva el detalle."""
-        context = get_customer_context(ctx)
-        session.slots["context"] = context
-        family, hint = support.mentioned_family(message)
-        kind, data = support.product_answer(context["products"], family, hint, session.language)
-        return self._support(session, "account_inquiry", "ACCOUNT_DETAIL", kind, intent, message, family, **data)
+        """Productos, saldos, movimientos: no es credito. Se anota lo que pide y se ofrece un asesor (sin consultar datos)."""
+        family, _ = support.mentioned_family(message)
+        return self._support(session, "account_inquiry", "ACCOUNT_DETAIL", "non_credit", intent, message, family)
 
     def _support_case_status(self, session: Session, ctx: ToolContext, intent: str, message: str) -> dict:
-        """Lo que el banco ve del caso abierto mas relevante (categoria, fecha, estado). El avance lo informa un asesor."""
-        context = get_customer_context(ctx)
-        session.slots["context"] = context
-        top, lang = context["most_relevant"], session.language
-        if top is None:
-            return self._support(session, "case_status", "CASE_FOLLOWUP", "case_status_none", intent, message)
-        more = templates.render("case_more", lang, {}) if context["counts"]["open"] > 1 else ""
-        return self._support(session, "case_status", "CASE_FOLLOWUP", "case_status_open", intent, message,
-                             case=support.case_phrase(top, lang), status=support.status_text(top, lang), more=more)
+        """Estado de un reclamo o caso: lo ve un asesor. Se anota lo que pregunta y se ofrece conectarlo."""
+        return self._support(session, "case_status", "CASE_FOLLOWUP", "non_credit", intent, message)
 
     def _support_incident(self, session: Session, intent: str, message: str) -> dict:
         """Fraude, cargo no reconocido, robo, reclamo nuevo: se reconoce, se pide lo basico para el asesor y se ofrece conectar."""

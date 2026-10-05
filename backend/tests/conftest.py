@@ -92,10 +92,9 @@ def pick_customers(state):
 def customers_by_offer_profile(state) -> dict[str, list[dict]]:
     """Clasifica por (consentimiento, preaprobacion con datos del banco) para pruebas de oferta proactiva. Preaprobado =
     elegible en gold con alguna opcion disponible; la oferta proactiva ademas exige offer_mode = proactive."""
-    from app.agent.context import blocks_proactive_offer
-    from app.agent.tools import ToolContext, get_customer_context, get_offers
+    from app.agent.tools import ToolContext, get_offers
 
-    # "consent_pre_case": preaprobado y con consentimiento, pero con un caso abierto que frena la oferta proactiva
+    # "consent_pre_case": preaprobado y con consentimiento, pero gold no lo ofrece proactivamente por una queja critica abierta
     out: dict[str, list[dict]] = {"consent_pre": [], "consent_pre_case": [], "noconsent_pre": [], "consent_notpre": []}
     df = state.repo._customers
     for r in df.itertuples():
@@ -105,10 +104,9 @@ def customers_by_offer_profile(state) -> dict[str, list[dict]]:
         tc = ToolContext(r.customer_id, state.repo, state.policy)
         pre = bool(prof["is_eligible"]) and bool(get_offers(tc, record=False).ordered)
         rec = {"doc": r.document_number, "income": local_income(state, r.customer_id), "cid": r.customer_id}
-        proactive = prof["offer_mode"] == "proactive"
-        if proactive and pre and blocks_proactive_offer(get_customer_context(tc)):
+        if pre and prof["accepts_marketing"] and prof.get("not_proactive_reason") == "open_critical_complaint":
             out["consent_pre_case"].append(rec)
-        elif proactive and pre:
+        elif prof["offer_mode"] == "proactive" and pre:
             out["consent_pre"].append(rec)
         elif not prof["accepts_marketing"] and pre:
             out["noconsent_pre"].append(rec)

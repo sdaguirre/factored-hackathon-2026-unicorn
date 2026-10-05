@@ -62,23 +62,6 @@ def test_credit_offer_is_still_possible_when_the_customer_asks_for_credit_after_
     assert r["outcome"] == "offers"
 
 
-def test_no_offer_while_a_recent_or_critical_case_is_open(client, state, groups):
-    """Un caso critico abierto o uno abierto en los ultimos 180 dias frena la oferta por iniciativa del banco."""
-    from app.agent.context import build_context
-    sid, h, _ = start(client, state, groups, "consent_pre")
-    recent = {"case_source": "complaint", "priority": "Low", "days_open": 20}
-    state.store.get(sid).slots["context"] = build_context([recent], [])
-    assert say(client, sid, h, "gracias")["proactive_offer"] is False
-    sid2, h2, _ = start(client, state, groups, "consent_pre", i=0)
-    old = {"case_source": "complaint", "priority": "Low", "days_open": 900}
-    state.store.get(sid2).slots["context"] = build_context([old], [])       # abierto desde hace anos: no frena
-    assert say(client, sid2, h2, "gracias")["proactive_offer"] is True
-    sid3, h3, _ = start(client, state, groups, "consent_pre", i=0)
-    critical_old = {"case_source": "complaint", "priority": "Critical", "days_open": 900}
-    state.store.get(sid3).slots["context"] = build_context([critical_old], [])   # critico: frena aunque sea viejo
-    assert say(client, sid3, h3, "gracias")["proactive_offer"] is False
-
-
 def test_accepting_the_offer_leads_into_the_normal_eligibility_flow(client, state, groups):
     sid, h, c = start(client, state, groups, "consent_pre")
     say(client, sid, h, "gracias")

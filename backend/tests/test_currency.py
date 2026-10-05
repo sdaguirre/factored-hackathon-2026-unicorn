@@ -41,19 +41,21 @@ def test_detect_currency(text, code, unsupported, generic):
     assert (m.code, m.unsupported, m.generic_peso) == (code, unsupported, generic)
 
 
-def test_conversion_uses_the_reference_rate_and_triangulates_when_a_pair_is_missing(state):
-    rate = state.repo.fx_rate("USD", "MXN").rate                     # la tasa que traiga el conjunto de datos en uso
+def test_conversion_uses_the_gold_fx_rate_of_the_profiles(state):
+    """Las tasas salen del fx_to_usd de gold (1 unidad local = fx_to_usd USD), las mismas con que gold calculo las ofertas."""
+    profiles = list(state.repo._credit.values())
+    mxn = next(p for p in profiles if p["local_currency"] == "MXN")
+    cop = next(p for p in profiles if p["local_currency"] == "COP")
     c = money.convert(state.repo, 1000, "USD", "MXN")
-    assert c and c.amount_dst == pytest.approx(1000 * rate) and c.quote.as_of == "2026-06-17"
-    assert c.rate_text == f"1 USD = {fmt_number(rate, 2)} MXN"
-    mxn_usd, usd_cop = state.repo.fx_rate("MXN", "USD").rate, state.repo.fx_rate("USD", "COP").rate
-    del state.repo._fx[("MXN", "COP")]
-    tri = money.convert(state.repo, 1000, "MXN", "COP")          # MXN -> USD -> COP
-    assert tri and tri.amount_dst == pytest.approx(1000 * mxn_usd * usd_cop)
+    assert c and c.amount_dst == pytest.approx(1000 / mxn["fx_to_usd"])
+    assert c.quote.as_of == str(mxn.get("fx_date") or "")[:10]
+    assert c.rate_text == f"1 USD = {fmt_number(1 / mxn['fx_to_usd'], 2)} MXN"
+    cross = money.convert(state.repo, 1000, "MXN", "COP")            # MXN -> COP a traves de USD
+    assert cross and cross.amount_dst == pytest.approx(1000 * mxn["fx_to_usd"] / cop["fx_to_usd"])
 
 
 def test_conversion_is_none_without_a_rate(state):
-    state.repo._fx.clear()
+    state.repo._fx_usd.clear()
     assert money.convert(state.repo, 10, "USD", "MXN") is None
 
 
@@ -106,7 +108,7 @@ def test_unsupported_currency_is_declined_instead_of_guessed(client, state, mx):
 
 def test_missing_rate_is_reported_not_invented(client, state, mx):
     sid, h = login(client, state, mx["doc"])
-    state.repo._fx.clear()
+    state.repo._fx_usd.clear()
     r = say(client, sid, h, "quiero un préstamo de 1000 dólares")
     assert "last_evaluation" not in state.store.get(sid).slots and "USD" in r["reply"]
 
