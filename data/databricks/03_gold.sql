@@ -15,7 +15,7 @@
 --     vista no admite parámetros, y el job las refresca en cada corrida.
 --   - gold_customer_credit_features (Versión V, reglas preliminares) ya no
 --     se crea acá: el agente lee customer_credit_profile (policy 0.3,
---     data/databricks/gold_credit_tables.sql).
+--     data/databricks/gold/10_customer_credit_profile.sql).
 --
 -- Archivo SQL (no notebook) para correr como tarea SQL de un Job sobre un
 -- SQL warehouse. Parámetros con nombre (catálogo.schema):
