@@ -12,6 +12,10 @@ class ApiError(Exception):
         self.status, self.code, self.message = status, code, message
 
 
+class DataUnavailable(Exception):
+    """La fuente de datos (Databricks) no respondio. Solo lleva la causa tecnica, nunca valores de la consulta."""
+
+
 def _body(code: str, message: str) -> dict:
     return {"error": {"code": code, "message": message, "trace_id": trace_id_var.get()}}
 
@@ -26,6 +30,11 @@ def register_error_handlers(app: FastAPI) -> None:
         # No se devuelve el valor recibido (podria ser un documento o texto del cliente)
         fields = ", ".join(".".join(str(p) for p in e["loc"][1:]) or "body" for e in exc.errors())
         return JSONResponse(status_code=422, content=_body("VALIDATION_ERROR", f"Campos invalidos: {fields}"))
+
+    @app.exception_handler(DataUnavailable)
+    async def _data_unavailable(_: Request, exc: DataUnavailable):
+        return JSONResponse(status_code=503, content=_body("DATA_UNAVAILABLE",
+                            "No pudimos consultar sus datos en este momento. Intente de nuevo en unos minutos."))
 
     @app.exception_handler(Exception)
     async def _unhandled(_: Request, exc: Exception):

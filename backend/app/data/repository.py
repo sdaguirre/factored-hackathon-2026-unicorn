@@ -4,8 +4,8 @@ El perfil de credito es la fila de gold customer_credit_profile (USD, politica 0
 tomado del export de gold (scripts/build_snapshot.py) o generado por el equipo (scripts/make_fixture.py). Las opciones de
 oferta no se guardan: se recalculan en memoria con la politica de referencia, identicas a gold (app/policy/engine.py).
 
-La interfaz `CustomerRepository` es el punto de reemplazo: en produccion seria un SQL Warehouse
-con filtros por fila; el resto del sistema no cambia.
+La interfaz `CustomerRepository` es el punto de reemplazo: app/data/databricks_repository.py la implementa contra
+el SQL Warehouse (CHAT_REPOSITORY=databricks); el resto del sistema no cambia.
 """
 from __future__ import annotations
 
@@ -52,6 +52,7 @@ class CustomerRepository(Protocol):
     def fx_rate(self, source: str, target: str) -> FxQuote | None: ...
     def contact_email_masked(self, customer_id: str) -> str | None: ...
     def documents_on_file(self, customer_id: str) -> set[str]: ...
+    def policy_versions(self) -> set[str]: ...
 
 
 def _clean(v):

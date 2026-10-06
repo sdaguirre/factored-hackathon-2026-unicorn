@@ -71,6 +71,11 @@ lanzar a mano desde Actions > Deploy > Run workflow (solo sobre `main`).
    Luego `echo organizer_snapshot > /home/deploy/app/.expected_data_source` y `docker compose up -d`. Cada export gold nuevo
    exige regenerar y volver a copiar el snapshot, y reiniciar el backend. Las ofertas aceptadas (`.local/offers`) se
    sincronizan aparte con `backend/scripts/sync_credit_offers.py`.
+   **Datos directos de Databricks (alternativa al snapshot)**: en `backend/.env` del servidor poner
+   `CHAT_REPOSITORY=databricks`, `CHAT_DATABRICKS_WAREHOUSE_ID`, `DATABRICKS_HOST` y `DATABRICKS_TOKEN` (de un service
+   principal con `SELECT` en las tablas de silver/gold que lee el backend y `MODIFY` solo en `credit_offers`; ver
+   `backend/README.md`), y `echo databricks > /home/deploy/app/.expected_data_source`. No hace falta el volumen del
+   snapshot. Las ofertas aceptadas se escriben solas en `gold.credit_offers`; el JSONL sigue de respaldo.
 4. Instalar el script como root: `install -o root -g root -m 755 deploy/chat-deploy.sh /usr/local/bin/chat-deploy`.
 5. Añadir la clave pública de CI a `/home/deploy/.ssh/authorized_keys`:
    `restrict,command="/usr/local/bin/chat-deploy" ssh-ed25519 AAAA… github-actions-deploy`

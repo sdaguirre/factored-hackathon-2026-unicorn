@@ -20,6 +20,17 @@ class Settings(BaseSettings):
 
     env: str = "dev"
     data_dir: Path = BASE_DIR / "data" / "snapshot"
+    # De donde salen los datos: "snapshot" (parquet en data_dir) o "databricks" (silver y gold reales por SQL Warehouse).
+    # Con databricks, las ofertas aceptadas tambien se escriben en <gold>.credit_offers. Credenciales: variables
+    # DATABRICKS_HOST + DATABRICKS_TOKEN (o DATABRICKS_CLIENT_ID/SECRET), o databricks_profile en desarrollo.
+    repository: Literal["snapshot", "databricks"] = "snapshot"
+    databricks_warehouse_id: str = ""
+    databricks_profile: str = ""
+    databricks_silver_schema: str = "workspace.silver_latam_bank"
+    databricks_gold_schema: str = "workspace.gold_latam_bank"
+    databricks_write_offers: bool = True
+    databricks_cache_seconds: int = 300
+    databricks_timeout_seconds: int = 60
     # Reglas del agente (documentos, atributos protegidos). La politica de credito es la de referencia (app/policy/engine.py).
     rules_path: Path = BASE_DIR / "policy" / "agent_rules.yaml"
     # Ofertas aceptadas (filas de gold credit_offers) en JSONL; scripts/sync_credit_offers.py las sube a Databricks.
@@ -55,6 +66,12 @@ class Settings(BaseSettings):
     )
 
     @model_validator(mode="after")
+    def _databricks_needs_warehouse(self):
+        if self.repository == "databricks" and not self.databricks_warehouse_id:
+            raise ValueError("CHAT_DATABRICKS_WAREHOUSE_ID es obligatorio con CHAT_REPOSITORY=databricks")
+        return self
+
+    @model_validator(mode="after")
     def _fallback_to_team_fixture(self):
         """Sin snapshot local (datos derivados del organizador, fuera de git) se usa el conjunto de ejemplo del equipo."""
         if "data_dir" not in self.model_fields_set and not (self.data_dir / "customers.parquet").exists():
@@ -63,6 +80,8 @@ class Settings(BaseSettings):
 
     @property
     def data_source(self) -> str:
+        if self.repository == "databricks":
+            return "databricks"
         return "team_fixture" if self.data_dir.name == "fixture" else "organizer_snapshot"
 
     @property
