@@ -50,6 +50,8 @@ _THIRD_PARTY = re.compile(r"\b(espos[oa]|marido|mujer|pareja|novi[oa]|companheir
                           r"gana|ganha)\b")
 # Names a credit product: with a term or one of these words, an amount is a new request, not the household income
 _CREDIT_WORDS = re.compile(r"\b(prestamo|credito|tarjeta|hipoteca|cupo|emprestimo|cartao|financiamento|limite)\b")
+# Asks for something: at the income or installments question a credit word alone names the debt ("tiene la hipoteca, 800")
+_REQUEST_VERB = re.compile(r"\b(quiero|quisiera|necesito|prefiero|mejor|dame|quero|queria|preciso|prefiro|gostaria)\b")
 
 
 @dataclass
@@ -550,7 +552,7 @@ class Orchestrator:
             return None
         if intent == "update_income" and not _THIRD_PARTY.search(norm(message)):
             return None                                           # "ahora gano X": su propio ingreso, no el del hogar
-        if _new_credit_request(message, intent):
+        if _new_credit_request(message, intent, awaiting):
             # "quiero un prestamo de 934499 a 60 meses": cambia de pedido en vez de responder; el monto no es del hogar
             session.slots.pop("household_pending", None)
             session.slots.pop("reasked", None)
@@ -924,10 +926,16 @@ class Orchestrator:
                          disclaimer=disclaimer_for(facts))
 
 
-def _new_credit_request(message: str, intent: str) -> bool:
-    """A new credit request while the household question is open: a term or a credit word, and no other person or
-    installments named ("mi esposa gana 20 mil" and "paga 4 mil de cuotas" are household answers)."""
+def _new_credit_request(message: str, intent: str, awaiting: str) -> bool:
+    """A new credit request while the household question is open, and no other person or installments named ("mi
+    esposa gana 20 mil" and "paga 4 mil de cuotas" are household answers). At the yes/no question a term or a credit
+    word is enough; at the income or installments question it takes a term or a request verb, because there a credit
+    word names that person's debt ("tiene la hipoteca, 800 al mes", "solo la tarjeta, 300")."""
     t = norm(message)
     if _THIRD_PARTY.search(t) or _INSTALLMENTS.search(t):
         return False
-    return parse_months(message) is not None or bool(_CREDIT_WORDS.search(t)) or intent == "credit_offers"
+    if parse_months(message) is not None:
+        return True
+    if awaiting == "household":
+        return bool(_CREDIT_WORDS.search(t)) or intent == "credit_offers"
+    return bool(_REQUEST_VERB.search(t) and _CREDIT_WORDS.search(t))
