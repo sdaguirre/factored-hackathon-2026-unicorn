@@ -91,3 +91,39 @@ def test_rewrite_kinds_can_be_disabled_by_configuration():
     app = create_app(make_settings(llm_rewrite_kinds="none"))
     assert app.state.ctx.orchestrator.rewrite_kinds == frozenset()
     assert TestClient(app).get("/health").status_code == 200
+
+
+class ScriptedLLM(MisbehavingLLM):
+    """Answers each message with the NLU result a real model gave in the live demo (2026-10-05)."""
+
+    def __init__(self, by_message: dict[str, NLUResult]):
+        super().__init__()
+        self.by_message = by_message
+
+    def extract(self, message, language_hint, yes_no_pending=False):
+        return self.by_message.get(message, NLUResult(intent="unknown"))
+
+
+def test_interest_in_a_product_and_another_term_work_whatever_the_llm_calls_them(client, state):
+    """Live demo: the LLM read "me interesa el préstamo personal" as credit_offers (the three offers repeated) and
+    "¿y a 36 meses?" as a bare yes (no pending question: "I did not understand"). Code reads both from the text."""
+    c = next(c for c in customers_by_offer_profile(state)["consent_pre"] if offer_amount(state, c["cid"]))
+    sid, h = login(client, state, c["doc"])
+    state.orchestrator.llm = ScriptedLLM({
+        "¿Qué créditos tengo preaprobados?": NLUResult(intent="credit_offers"),
+        "Me interesa el préstamo personal": NLUResult(intent="credit_offers"),
+        "¿Y a 36 meses?": NLUResult(intent="confirm_yes", months=36),
+    })
+    assert say(client, sid, h, "¿Qué créditos tengo preaprobados?")["outcome"] == "offers"
+    r = say(client, sid, h, "Me interesa el préstamo personal")
+    assert r["intent"] == "credit_eligibility" and r["awaiting"] == "amount", r
+    r = say(client, sid, h, "¿Y a 36 meses?")
+    assert "36" in r["reply"] and r["disclaimer"] == "simulation", r
+
+
+def test_a_bare_offers_question_still_lists_the_offers(client, state):
+    c = next(c for c in customers_by_offer_profile(state)["consent_pre"] if offer_amount(state, c["cid"]))
+    sid, h = login(client, state, c["doc"])
+    state.orchestrator.llm = ScriptedLLM({"¿Qué ofertas de tarjeta de crédito tengo?": NLUResult(intent="credit_offers")})
+    assert say(client, sid, h, "¿Qué ofertas de tarjeta de crédito tengo?")["outcome"] == "offers"
+

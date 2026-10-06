@@ -18,7 +18,7 @@ from app.agent.evidence import build_evidence
 from app.agent.handoff import build_summary
 from app.agent.language import norm, parse_amounts, parse_months
 from app.agent.llm import LLM, MockLLM
-from app.agent.nlu import HUMAN_REQUEST, NLUResult
+from app.agent.nlu import _WANT, HUMAN_REQUEST, NLUResult, _product
 from app.agent.tools import (HandoffQueue, ToolContext, accept_offer, get_offers, get_profile,
                              new_ticket_id, recalculate_offer, to_local, utc_iso)
 from app.core.fmt import fmt_money, fmt_pct
@@ -120,6 +120,11 @@ def validate_nlu(nlu: NLUResult, message: str) -> NLUResult:
     # Una derivacion a humano es una accion: solo se acepta si el cliente la pidio de forma explicita en su texto.
     if nlu.intent == "request_human" and not HUMAN_REQUEST.search(norm(message)):
         upd["intent"] = "other_topic" if nlu.sensitive_topic else "unknown"
+    # "me interesa el prestamo personal" after the offers: interest in a named product is a request for it. The LLM
+    # sometimes calls it credit_offers (the offers repeat) or a bare yes; the rules NLU already reads it this way.
+    t = norm(message)
+    if nlu.intent in ("credit_offers", "confirm_yes") and _WANT.search(t) and (product := _product(t)) and not amounts:
+        upd.update(intent="credit_eligibility", product=product)
     return nlu.model_copy(update=upd) if upd else nlu
 
 
@@ -246,7 +251,8 @@ class Orchestrator:
         if awaiting == "amount" and amounts and intent in ("unknown", "credit_eligibility", "confirm_yes", "credit_offers"):
             nlu = nlu.model_copy(update={"intent": "credit_eligibility", "amount": amounts[0]})
             intent = "credit_eligibility"
-        elif awaiting == "amount" and intent == "confirm_yes" and session.slots.get("pending_request", {}).get("featured_amount"):
+        elif (awaiting == "amount" and intent == "confirm_yes" and not parse_months(message)
+              and session.slots.get("pending_request", {}).get("featured_amount")):
             req = session.slots["pending_request"]                # "si" al maximo propuesto
             req.update(amount=req["featured_amount"], conv=None)
             return self._evaluate(session, ctx, "credit_eligibility")
@@ -261,7 +267,9 @@ class Orchestrator:
 
         pending = session.slots.get("pending_request") or {}
         months_only = parse_months(message) or nlu.months
-        if intent == "unknown" and months_only and pending.get("product"):
+        awaiting_yes_no = awaiting in ("confirm_handoff", "offer_interest", "household", "proceed", "docs_all", "doc_item")
+        # "¿y a 36 meses?" after an offer: another term for the same product (the LLM may read it as a bare yes)
+        if intent in ("unknown", "confirm_yes") and months_only and pending.get("product") and not awaiting_yes_no:
             pending.update(months=months_only, amount=None, conv=None)    # otro plazo: la oferta mas alta a ese plazo
             session.slots["pending_request"] = pending
             return self._evaluate(session, ctx, "credit_eligibility")
