@@ -102,10 +102,13 @@ class MockNLU:
     def extract(self, message: str, language_hint: str | None = None, yes_no_pending: bool = False) -> NLUResult:
         t = norm(message)
         lang = detect_language(message) or language_hint
-        amounts = parse_amounts(message)
+        # Only values a request can carry: "0 pesos" or "999 meses" must not break the turn (the strict model would raise)
+        amounts = [a for a in parse_amounts(message) if 0 < a < 1e10]
         sensitive = bool(_SENSITIVE.search(t))
         sentiment: Sentiment | None = "negative" if _NEGATIVE.search(t) else None
-        base = dict(language=lang, months=parse_months(message), sentiment=sentiment, sensitive_topic=sensitive)
+        months = parse_months(message)
+        base = dict(language=lang, months=months if months and 1 <= months <= 480 else None, sentiment=sentiment,
+                    sensitive_topic=sensitive)
 
         if _IDENTITY.search(t):                          # "robot"/"robô" contiene "robo" (robo = hurto): no es un tema sensible
             return NLUResult(intent="ask_identity", **{**base, "sensitive_topic": False})

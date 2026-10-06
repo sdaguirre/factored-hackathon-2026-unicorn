@@ -38,7 +38,7 @@ def detect_language(text: str) -> str | None:
 _NUM = re.compile(r"(\d[\d.,]*)\s*(mil|k|millones|millon|milhoes|milhao)?\b")
 _MULT = {"mil": 1_000, "k": 1_000, "millon": 1_000_000, "millones": 1_000_000, "milhao": 1_000_000,
          "milhoes": 1_000_000}
-_MONTHS = re.compile(r"(\d{1,3})\s*(meses|mes|months|anos|ano|años|año)\b")
+_MONTHS = re.compile(r"(\d{1,3})\s*(meses|mese|mes|months|anos|ano|años|año)\b")
 
 
 def _to_float(token: str) -> float | None:
@@ -74,9 +74,11 @@ def parse_amounts(text: str) -> list[float]:
     """Montos en el texto, interpretando 1.500,50 / 1,500.50 / 5.000 / 5k / 5 mil. Excluye plazos ('36 meses')."""
     t = _MONTHS.sub(" ", norm(text))
     out: list[float] = []
-    for num, mult in _NUM.findall(t):
-        v = _to_float(num)
+    for m in _NUM.finditer(t):
+        if m.start() > 0 and t[m.start() - 1] == "-":          # "-5000": a negative is never an amount or an income
+            continue
+        v = _to_float(m.group(1))
         if v is None:
             continue
-        out.append(v * _MULT.get(mult, 1))
+        out.append(v * _MULT.get(m.group(2), 1))
     return out
