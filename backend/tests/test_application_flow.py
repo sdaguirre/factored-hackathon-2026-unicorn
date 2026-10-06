@@ -235,3 +235,27 @@ def test_outbox_rejects_path_tricks(tmp_path):
     rec = ob.queue(customer_id="c", to_masked="a***@x.com", subject="s", pdf=b"%PDF-test", language="es")
     assert ob.pdf_bytes(rec["id"]) == b"%PDF-test"
     assert ob.pdf_bytes("../secret") is None and ob.pdf_bytes("EML-../x") is None
+
+
+@pytest.mark.parametrize("text", ["quiero un préstamo de {big} a {months} meses", "mejor {small} a {months} meses",
+                                  "y la tarjeta de crédito?"])
+def test_a_new_credit_request_at_the_household_question_is_not_household_income(client, state, cust, text):
+    """At the household question the customer asks for another credit: the amount is a new request, not the income
+    of someone in the household (found testing with real data: it asked for the partner's installments)."""
+    set_docs(state, cust["cid"], ALL_DOCS)
+    sid, h = login(client, state, cust["doc"])
+    amount, months = offer_amount(state, cust["cid"], share=0.3)
+    r = say(client, sid, h, f"quiero un préstamo de {int(amount)} a {months} meses")
+    assert r["awaiting"] == "household", r
+    r = say(client, sid, h, text.format(big=int(amount) * 3, small=int(amount // 2), months=months))
+    assert r["awaiting"] not in ("household_income", "household_debt"), r
+    assert "cuotas" not in r["reply"] or "esa persona" not in r["reply"], r
+
+
+def test_a_household_answer_with_an_amount_is_still_household_income(client, state, cust):
+    set_docs(state, cust["cid"], ALL_DOCS)
+    sid, h = login(client, state, cust["doc"])
+    amount, months = offer_amount(state, cust["cid"], share=0.3)
+    say(client, sid, h, f"quiero un préstamo de {int(amount)} a {months} meses")
+    r = say(client, sid, h, "sí, mi esposa gana 20 mil")
+    assert r["awaiting"] == "household_debt", r

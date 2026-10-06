@@ -48,6 +48,8 @@ _NO_DEBT = re.compile(r"\b(ningun[ao]?|nada|nenhum[a]?|zero|cero|no paga|nao pag
 _THIRD_PARTY = re.compile(r"\b(espos[oa]|marido|mujer|pareja|novi[oa]|companheir[oa]|conyuge|hij[oa]|filh[oa]|herman[oa]|"
                           r"irma[o]?|madre|padre|mae|pai|mama|papa|suegr[oa]|sogr[oa]|ella|ele|essa pessoa|esa persona|"
                           r"gana|ganha)\b")
+# Names a credit product: with a term or one of these words, an amount is a new request, not the household income
+_CREDIT_WORDS = re.compile(r"\b(prestamo|credito|tarjeta|hipoteca|cupo|emprestimo|cartao|financiamento|limite)\b")
 
 
 @dataclass
@@ -548,6 +550,11 @@ class Orchestrator:
             return None
         if intent == "update_income" and not _THIRD_PARTY.search(norm(message)):
             return None                                           # "ahora gano X": su propio ingreso, no el del hogar
+        if _new_credit_request(message, intent):
+            # "quiero un prestamo de 934499 a 60 meses": cambia de pedido en vez de responder; el monto no es del hogar
+            session.slots.pop("household_pending", None)
+            session.slots.pop("reasked", None)
+            return None
         ccy = get_profile(ctx)["local_currency"]
         if awaiting == "household" and amounts and intent != "confirm_no":
             awaiting = "household_income"                         # "si, mi pareja gana 20.000": ya trae el ingreso
@@ -915,3 +922,12 @@ class Orchestrator:
                          proactive_offer=facts.get("proactive_offer", False),
                          summary_ready=bool(facts.get("summary")), email=facts.get("email"),
                          disclaimer=disclaimer_for(facts))
+
+
+def _new_credit_request(message: str, intent: str) -> bool:
+    """A new credit request while the household question is open: a term or a credit word, and no other person or
+    installments named ("mi esposa gana 20 mil" and "paga 4 mil de cuotas" are household answers)."""
+    t = norm(message)
+    if _THIRD_PARTY.search(t) or _INSTALLMENTS.search(t):
+        return False
+    return parse_months(message) is not None or bool(_CREDIT_WORDS.search(t)) or intent == "credit_offers"
