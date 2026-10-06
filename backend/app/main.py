@@ -21,7 +21,7 @@ from app.config import Settings, get_settings
 from app.core.outbox import Outbox
 from app.core.ratelimit import AuthLockout
 from app.core.sessions import SessionStore
-from app.data.repository import SnapshotRepository
+from app.data.repository import CustomerRepository, SnapshotRepository
 from app.deps import AppState
 from app.errors import register_error_handlers
 from app.logging_setup import log, setup_logging, trace_id_var
@@ -39,7 +39,7 @@ def _rewrite_kinds(settings: Settings) -> frozenset[str]:
     return frozenset() if raw == "none" else frozenset(k.strip() for k in raw.split(",") if k.strip())
 
 
-def check_policy_version(repo: SnapshotRepository, policy: eng.Policy, env: str) -> None:
+def check_policy_version(repo: CustomerRepository, policy: eng.Policy, env: str) -> None:
     """El perfil (export de gold) y la politica (data/reference) deben ser la misma version: un perfil 0.3 con la politica
     0.4 ofreceria plazos que gold ya no permite (sin tope por edad). En prod no arranca; en dev solo avisa."""
     found = repo.policy_versions()
@@ -58,14 +58,24 @@ def build_state(settings: Settings) -> AppState:
     if not secret:
         secret = secrets.token_urlsafe(32)
         logging.getLogger("chat").warning("CHAT_JWT_SECRET vacio: se genero uno temporal; las sesiones no sobreviven al reinicio.")
-    repo = SnapshotRepository(settings.data_dir)
+    sink = None
+    if settings.repository == "databricks":
+        from app.data.databricks_repository import DatabricksOfferSink, DatabricksRepository, SqlWarehouse
+
+        sql = SqlWarehouse(settings.databricks_warehouse_id, settings.databricks_profile, settings.databricks_timeout_seconds)
+        repo = DatabricksRepository(sql, settings.databricks_silver_schema, settings.databricks_gold_schema,
+                                    ttl_s=settings.databricks_cache_seconds)
+        if settings.databricks_write_offers:
+            sink = DatabricksOfferSink(sql, settings.databricks_gold_schema)
+    else:
+        repo = SnapshotRepository(settings.data_dir)
     policy = eng.load_policy()
     check_policy_version(repo, policy, settings.env)
     with open(settings.rules_path, encoding="utf-8") as f:
         rules = yaml.safe_load(f)
     queue = HandoffQueue()
     outbox = Outbox(settings.outbox_dir)
-    offers = OfferStore(settings.offers_path)
+    offers = OfferStore(settings.offers_path, sink)
     return AppState(
         settings=settings, repo=repo, policy=policy, rules=rules, jwt_secret=secret, queue=queue, outbox=outbox, offers=offers,
         store=SessionStore(settings.session_ttl_minutes),

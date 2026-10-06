@@ -213,13 +213,34 @@ python data/scripts/check_engine_parity.py --engine app.policy.engine:offer_opti
 - **Accepted offer.** "Yes" to moving forward calls `accept_offer`: it recalculates (never takes figures from the text),
   validates amount and 20%, adds `F02`/`F03`/`F04` and writes the gold `credit_offers` row to `CHAT_OFFERS_PATH`
   (JSONL). On handoff, the row is rewritten with `status = handed_off` and the ticket. `scripts/sync_credit_offers.py`
-  uploads the rows to Databricks with a `MERGE` by `offer_id` (without `--apply` it only shows what it would upload), so
-  the container needs no credentials. With Docker Compose the file lives in `.local/offers/` on the host (volume,
+  uploads the rows to Databricks with a `MERGE` by `offer_id` (without `--apply` it only shows what it would upload).
+  With `CHAT_REPOSITORY=databricks` the API also writes each row to `<gold>.credit_offers` itself (a background thread,
+  so the customer's turn is not delayed); if that write fails it is logged (`offer_sync_failed`) and the JSONL keeps
+  the row, so run the script to retry. With Docker Compose the file lives in `.local/offers/` on the host (volume,
   git-ignored) and survives restarts:
   `python backend/scripts/sync_credit_offers.py --file .local/offers/credit_offers.jsonl --gold-schema
   workspace.gold_latam_bank_test --apply --profile <profile> --warehouse-id <id>` (try it on `_test` first).
 - **Agent rules** (`policy/agent_rules.yaml`): documents per product (and those of the household member if their income
   was added) and protected attributes. `date_of_birth` is only used, in gold, for the age-at-maturity term cap.
+
+## Data source: snapshot or Databricks
+
+`CHAT_REPOSITORY=snapshot` (default) reads the parquet snapshot or the team fixture. `CHAT_REPOSITORY=databricks`
+(`app/data/databricks_repository.py`) reads the real silver (`customers`, `products`, `branches`) and gold
+(`customer_credit_profile`) tables through a SQL Warehouse, so any customer in the bank can log in. Settings:
+`CHAT_DATABRICKS_WAREHOUSE_ID` (required), `CHAT_DATABRICKS_SILVER_SCHEMA` / `CHAT_DATABRICKS_GOLD_SCHEMA` (default
+`workspace.silver_latam_bank` / `workspace.gold_latam_bank`), `CHAT_DATABRICKS_PROFILE` (CLI profile, development) or the
+`DATABRICKS_HOST` + `DATABRICKS_TOKEN` (or `DATABRICKS_CLIENT_ID`/`SECRET`) environment variables in the container.
+The service principal or token needs `SELECT` on those four tables and `MODIFY` on `credit_offers` only.
+
+- Values travel as named parameters, never inside the SQL; schema names are validated. Documents and answers are never logged.
+- Measured against prod (serverless warehouse): startup about 10 s (branches, FX, policy version and 200 decoy customers are
+  loaded once), login about 1 s (one query brings the customer, facts and active products), profile about 1 s, cached
+  `CHAT_DATABRICKS_CACHE_SECONDS` (300). An unknown document costs the same as a real one (the decoy comes from the preloaded pool).
+- If Databricks does not answer, the API returns `503 DATA_UNAVAILABLE`; at startup the service does not come up (Compose restarts it).
+- `docs_on_file` has no Databricks source: it is derived from a hash of the customer id, exactly as `build_snapshot.py` does.
+- Customers without enough data for the security questions still get `409 AUTH_UNAVAILABLE` (as with the snapshot).
+- Tests use the snapshot/fixture or a fake warehouse (`tests/test_databricks_repository.py`); none needs credentials.
 
 ## Proactive credit offer
 

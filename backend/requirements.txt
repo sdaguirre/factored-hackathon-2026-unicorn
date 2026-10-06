@@ -9,3 +9,5 @@ pyarrow==25.0.1
 # Solo se importa con CHAT_LLM_PROVIDER=anthropic
 anthropic==1.11.0
 fpdf2==2.8.9
+# Solo se importa con CHAT_REPOSITORY=databricks
+databricks-sdk==0.146.0
