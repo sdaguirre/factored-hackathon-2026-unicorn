@@ -242,6 +242,22 @@ T: dict[str, dict[str, str | list[str]]] = {
         "es": "Sin las cuotas de esa persona todavía no puedo sumar su ingreso; lo dejo anotado para que un asesor lo complete.",
         "pt": "Sem as parcelas dessa pessoa ainda não posso somar a renda dela; deixo anotado para um consultor completar.",
     },
+    "household_income_unknown": {
+        "es": "Sin el ingreso de esa persona no lo puedo sumar; lo dejo anotado para que un asesor lo complete.",
+        "pt": "Sem a renda dessa pessoa não posso somá-la; deixo anotado para um consultor completar.",
+    },
+    "household_implausible": {
+        "es": "Esa cifra es muy alta para sumarla aquí; la dejo anotada para que un asesor la verifique con los documentos.",
+        "pt": "Esse valor é alto demais para somar aqui; deixo anotado para um consultor verificar com os documentos.",
+    },
+    "household_not_added": {
+        "es": "Con esas cuotas, sumar el ingreso de esa persona no mejora su propuesta, así que seguimos con la suya.",
+        "pt": "Com essas parcelas, somar a renda dessa pessoa não melhora sua proposta, então seguimos com a sua.",
+    },
+    "which_product": {
+        "es": "¡Perfecto! ¿Cuál de las ofertas le interesa: el préstamo personal, la tarjeta de crédito o el préstamo hipotecario?",
+        "pt": "Perfeito! Qual das ofertas interessa: o empréstimo pessoal, o cartão de crédito ou o financiamento imobiliário?",
+    },
     "household_none": {
         "es": "Entendido.",
         "pt": "Entendido.",
@@ -413,6 +429,8 @@ EMAIL_SUBJECT = {"es": "Resumen de su propuesta de crédito", "pt": "Resumo da s
 
 SUGGESTIONS = {
     "yes_no": {"es": ["Sí", "No"], "pt": ["Sim", "Não"]},
+    "products": {"es": ["Préstamo personal", "Tarjeta de crédito", "Préstamo hipotecario"],
+                 "pt": ["Empréstimo pessoal", "Cartão de crédito", "Financiamento imobiliário"]},
     "start": {"es": ["Ver mis ofertas de crédito", "Hablar con un asesor"],
               "pt": ["Ver minhas ofertas de crédito", "Falar com um consultor"]},
 }

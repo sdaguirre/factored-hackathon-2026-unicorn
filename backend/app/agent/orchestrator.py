@@ -48,6 +48,11 @@ _NO_DEBT = re.compile(r"\b(ningun[ao]?|nada|nenhum[a]?|zero|cero|no paga|nao pag
 _THIRD_PARTY = re.compile(r"\b(espos[oa]|marido|mujer|pareja|novi[oa]|companheir[oa]|conyuge|hij[oa]|filh[oa]|herman[oa]|"
                           r"irma[o]?|madre|padre|mae|pai|mama|papa|suegr[oa]|sogr[oa]|ella|ele|essa pessoa|esa persona|"
                           r"gana|ganha)\b")
+# A declared household income above this (USD a month) is not added in the chat; the advisor verifies it
+HOUSEHOLD_INCOME_CAP_USD = 50_000
+# A short acceptance on its own: whatever the LLM calls it ("beleza" as a greeting, "va" or "fechado" as unknown)
+_ACCEPT = re.compile(r"^(si|sim|ok|okay|va|vale|dale|listo|perfecto|de acuerdo|me sirve|eso me sirve|ese me sirve|beleza|"
+                     r"fechado|combinado|certo|isso me serve|pode ser|aceito|acepto)[.!\s]*$")
 # Names a credit product: with a term or one of these words, an amount is a new request, not the household income
 _CREDIT_WORDS = re.compile(r"\b(prestamo|credito|tarjeta|hipoteca|cupo|emprestimo|cartao|financiamento|limite)\b")
 # Asks for something: at the income or installments question a credit word alone names the debt ("tiene la hipoteca, 800")
@@ -123,6 +128,8 @@ def validate_nlu(nlu: NLUResult, message: str) -> NLUResult:
     # "me interesa el prestamo personal" after the offers: interest in a named product is a request for it. The LLM
     # sometimes calls it credit_offers (the offers repeat) or a bare yes; the rules NLU already reads it this way.
     t = norm(message)
+    if _ACCEPT.match(t) and nlu.intent not in ("confirm_yes", "confirm_no"):
+        upd["intent"] = "confirm_yes"
     if nlu.intent in ("credit_offers", "confirm_yes") and _WANT.search(t) and (product := _product(t)) and not amounts:
         upd.update(intent="credit_eligibility", product=product)
     return nlu.model_copy(update=upd) if upd else nlu
@@ -221,6 +228,9 @@ class Orchestrator:
             # Cuenta mas detalles en vez de decir si/no: se anotan (un tema generico o ininteligible no cambia el motivo).
             if session.slots.get("case") and (intent == "unknown" or (intent == "other_topic" and not nlu.sensitive_topic)):
                 return self._collect_detail(session, message)
+        if awaiting == "offer_choice" and intent == "confirm_yes":
+            session.slots["awaiting"] = "offer_choice"
+            return self._facts("which_product", intent, suggest="products")
         if awaiting == "offer_interest":
             if intent == "confirm_yes":
                 return self._proactive_accepted(session, ctx, intent)
@@ -421,6 +431,8 @@ class Orchestrator:
              "options": [{k: o[k] for k in ("option_code", "term_months", "offer_rate_pct", "offer_max_amount_usd")}
                          for o in offers.ordered]})
         session.slots["offers_shown"] = True
+        if len(offers.ordered) > 1:
+            session.slots["awaiting"] = "offer_choice"            # a bare "yes" next means "one of these": ask which
         kind = "offers_declared" if self._declared(session).get("income") is not None else "offers"
         return self._facts(kind, "credit_offers", outcome="offers", lines=templates.join_list(lines, lang))
 
@@ -584,11 +596,24 @@ class Orchestrator:
                     facts = self._facts("ask_household_income", intent, awaiting=awaiting, ccy=ccy)
                     facts["pre"] = ["reask_number"]
                     return facts
+                if intent in ("unknown", "confirm_yes"):             # "no se" again: the advisor completes it
+                    session.slots.pop("reasked", None)
+                    session.actions.append({"type": "household_income_not_added", "reason": "income_unknown",
+                                            "verified": True})
+                    return self._after_household(session, "household_income_unknown", intent)
                 return None
+            if amounts[0] <= 0:                                   # "0": that person has no income to add
+                session.slots.pop("reasked", None)
+                return self._after_household(session, "household_none", intent)
             value, conv, err = self._to_local(session, ctx, amounts[0], mention)
             if err:
                 session.slots["awaiting"] = "household_income"
                 return self._facts("fx_unavailable", intent, awaiting="household_income", ccy=err)
+            if value > (to_local(get_profile(ctx), HOUSEHOLD_INCOME_CAP_USD) or float("inf")):
+                # Implausible for a monthly income: not added here; the advisor verifies it with documents
+                session.slots.pop("reasked", None)
+                session.actions.append({"type": "household_income_not_added", "reason": "implausible", "verified": True})
+                return self._after_household(session, "household_implausible", intent)
             session.slots["household_pending"] = {"income": value}
             session.slots.pop("reasked", None)
             if len(amounts) > 1 and _INSTALLMENTS.search(norm(message)):   # trajo tambien sus cuotas
@@ -611,6 +636,11 @@ class Orchestrator:
                 session.slots["household_pending"] = pending
                 session.slots["awaiting"] = "household_debt"
                 return self._facts("fx_unavailable", intent, awaiting="household_debt", ccy=err)
+        if debt >= pending["income"]:
+            # That person's installments take all their income: adding them can only lower the proposal
+            session.actions.append({"type": "household_income_not_added", "reason": "installments_exceed_income",
+                                    "verified": True})
+            return self._after_household(session, "household_not_added", intent)
         declared = self._declared(session)
         declared["household_income"] = pending["income"]
         declared["household_installments"] = debt

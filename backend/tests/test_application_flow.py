@@ -284,3 +284,52 @@ def test_a_new_request_at_the_installments_question_still_switches(client, state
     r = say(client, sid, h, f"mejor quiero un préstamo de {int(amount // 2)} a {months} meses")
     assert r["awaiting"] not in ("household_debt", "household_income"), r
 
+
+
+# ---------------------------------------------------------------- edge cases found on the live demo (2026-10-05)
+@pytest.mark.parametrize("text", ["Quiero un préstamo de 0 pesos a 12 meses", "Quiero un préstamo de 100 mil a 999 meses"])
+def test_out_of_range_numbers_do_not_break_the_turn(client, state, cust, text):
+    sid, h = login(client, state, cust["doc"])
+    r = client.post(f"/v1/sessions/{sid}/messages", json={"message": text}, headers=h)
+    assert r.status_code == 200, r.text
+
+
+def test_a_yes_after_the_list_of_offers_asks_which_one(client, state, cust):
+    sid, h = login(client, state, cust["doc"])
+    assert say(client, sid, h, "¿Qué créditos tengo preaprobados?")["outcome"] == "offers"
+    r = say(client, sid, h, "eso me sirve")
+    assert len(r["suggested_replies"]) == 3 and "?" in r["reply"], r
+    assert say(client, sid, h, r["suggested_replies"][0])["intent"] == "credit_eligibility"
+
+
+def _at_household_income(client, state, cust):
+    set_docs(state, cust["cid"], ALL_DOCS)
+    sid, h = login(client, state, cust["doc"])
+    amount, months = offer_amount(state, cust["cid"], share=0.3)
+    say(client, sid, h, f"quiero un préstamo de {int(amount)} a {months} meses")
+    assert say(client, sid, h, "Sí")["awaiting"] == "household_income"
+    return sid, h
+
+
+def test_household_income_of_zero_adds_nobody(client, state, cust):
+    sid, h = _at_household_income(client, state, cust)
+    assert say(client, sid, h, "0")["awaiting"] == "proceed"
+
+
+def test_a_negative_household_income_is_asked_again(client, state, cust):
+    sid, h = _at_household_income(client, state, cust)
+    r = say(client, sid, h, "-5000")
+    assert r["awaiting"] == "household_income", r
+
+
+def test_an_implausible_household_income_is_left_to_the_advisor(client, state, cust):
+    sid, h = _at_household_income(client, state, cust)
+    r = say(client, sid, h, "999999999999")
+    assert r["awaiting"] == "proceed" and r["outcome"] is None, r
+
+
+def test_installments_above_that_income_do_not_spoil_the_proposal(client, state, cust):
+    sid, h = _at_household_income(client, state, cust)
+    say(client, sid, h, "10 mil")
+    r = say(client, sid, h, "50 mil")
+    assert r["awaiting"] == "proceed" and r["outcome"] != "declined", r
